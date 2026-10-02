@@ -80,7 +80,7 @@ async function bootstrap() {
       methods: ['GET', 'POST']
     },
     transports: ['websocket', 'polling'],
-    maxHttpBufferSize: 1e7 // 10MB
+    maxHttpBufferSize: 2e7 // 20MB — handles 256KB chunks with room for framing overhead
   });
 
   // Attach Signaling Service

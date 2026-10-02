@@ -527,27 +527,20 @@ export class TransferManager {
       const end = Math.min(start + CHUNK_SIZE, file.size);
       const buffer = await file.slice(start, end).arrayBuffer();
 
-      // Convert chunk to base64 for reliable JSON socket transit
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]!);
-      }
-      const base64Data = btoa(binary);
-
       // Dynamically resolve target peer ID in case peer reconnected with a new socket ID
       const currentDevices = useDeviceStore.getState().devices;
       const targetPeer = currentDevices.get(targetPeerId) ||
         Array.from(currentDevices.values()).find((d) => d.name === useTransferStore.getState().transfers.get(transferId)?.receiverName);
       const activeToId = targetPeer ? targetPeer.id : targetPeerId;
 
+      // Send raw ArrayBuffer — no base64 overhead (~33% faster throughput)
       socketService.sendRelayChunk({
         from: '',
         to: activeToId,
         transferId,
         sequence: seq,
         totalChunks,
-        data: base64Data
+        data: buffer
       });
 
       bytesSent += buffer.byteLength;
@@ -570,9 +563,9 @@ export class TransferManager {
         lastBytes = bytesSent;
       }
 
-      // Small yield every 4 chunks to keep event loop responsive
-      if (seq % 4 === 0) {
-        await new Promise((r) => setTimeout(r, 5));
+      // Small yield every 16 chunks to keep event loop responsive while maximizing throughput
+      if (seq % 16 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
       }
     }
 
