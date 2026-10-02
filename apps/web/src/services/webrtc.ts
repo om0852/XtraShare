@@ -9,6 +9,8 @@ export class PeerConnectionManager {
   private messageListeners = new Set<(peerId: string, data: string | ArrayBuffer) => void>();
   private stateListeners = new Set<(peerId: string, state: RTCPeerConnectionState) => void>();
 
+  private iceCandidateQueues = new Map<string, RTCIceCandidateInit[]>();
+
   constructor() {
     socketService.onSignal((packet) => this.handleSignal(packet));
     socketService.onPeerLeave((deviceId) => {
@@ -73,8 +75,10 @@ export class PeerConnectionManager {
     // Negotiation needed handler (glare-safe polite peer pattern)
     pc.onnegotiationneeded = async () => {
       try {
+        if (this.makingOffer.get(peerId)) return;
         this.makingOffer.set(peerId, true);
         const offer = await pc.createOffer();
+        if (pc.signalingState !== 'stable') return;
         await pc.setLocalDescription(offer);
 
         socketService.sendSignal({
@@ -134,6 +138,20 @@ export class PeerConnectionManager {
     this.dataChannels.set(peerId, channel);
   }
 
+  private async drainIceCandidates(peerId: string, pc: RTCPeerConnection): Promise<void> {
+    const queue = this.iceCandidateQueues.get(peerId);
+    if (queue && queue.length > 0) {
+      this.iceCandidateQueues.delete(peerId);
+      for (const cand of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.warn('Failed to add queued ICE candidate:', e);
+        }
+      }
+    }
+  }
+
   private async handleSignal(packet: SignalPacket): Promise<void> {
     const peerId = packet.from;
     const selfId = useDeviceStore.getState().selfDevice?.id || '';
@@ -156,6 +174,8 @@ export class PeerConnectionManager {
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(packet.payload));
+        await this.drainIceCandidates(peerId, pc);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -167,12 +187,22 @@ export class PeerConnectionManager {
         });
       } else if (packet.type === 'answer') {
         await pc.setRemoteDescription(new RTCSessionDescription(packet.payload));
+        await this.drainIceCandidates(peerId, pc);
       } else if (packet.type === 'ice-candidate') {
         if (packet.payload) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(packet.payload));
-          } catch (e) {
-            console.warn('Failed to add received ICE candidate:', e);
+          if (!pc.remoteDescription || !pc.remoteDescription.type) {
+            let queue = this.iceCandidateQueues.get(peerId);
+            if (!queue) {
+              queue = [];
+              this.iceCandidateQueues.set(peerId, queue);
+            }
+            queue.push(packet.payload);
+          } else {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(packet.payload));
+            } catch (e) {
+              console.warn('Failed to add received ICE candidate:', e);
+            }
           }
         }
       }
