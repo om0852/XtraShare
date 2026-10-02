@@ -244,27 +244,40 @@ export class TransferManager {
     }
   }
 
-  public cancelTransfer(transferId: string): void {
-    const transfer = useTransferStore.getState().transfers.get(transferId);
-    if (!transfer) return;
-
+  /**
+   * Centralised cleanup of all sender-side state for a transfer.
+   * Safe to call multiple times — idempotent.
+   */
+  private cleanupSenderState(transferId: string): void {
     const senderRef = this.activeSenders.get(transferId);
     if (senderRef) {
       senderRef.abort = true;
       this.activeSenders.delete(transferId);
     }
-
-    this.activeReceivers.delete(transferId);
     this.senderFiles.delete(transferId);
     delete (this as any)[`file_${transferId}`];
+  }
+
+  public cancelTransfer(transferId: string): void {
+    const transfer = useTransferStore.getState().transfers.get(transferId);
+    if (!transfer) return;
+
+    // Guard: don't double-cancel (would send duplicate file-error to peer)
+    const currentStatus = transfer.status;
+    if (currentStatus === 'cancelled' || currentStatus === 'completed' || currentStatus === 'failed') {
+      return;
+    }
+
+    this.cleanupSenderState(transferId);
+    this.activeReceivers.delete(transferId);
     chunkStorage.deleteSession(transferId);
 
     useTransferStore.getState().removePendingOffer(transferId);
     useTransferStore.getState().updateTransfer(transferId, { status: 'cancelled' });
 
-    const targetPeerId = transfer.senderId === useDeviceStore.getState().selfDevice?.id
-      ? transfer.receiverId
-      : transfer.senderId;
+    const selfId = useDeviceStore.getState().selfDevice?.id;
+    const targetPeerId = transfer.senderId === selfId ? transfer.receiverId : transfer.senderId;
+    if (!targetPeerId) return;
 
     this.sendControlMessage(targetPeerId, {
       type: 'file-error',
@@ -810,7 +823,7 @@ export class TransferManager {
       }
 
       case 'file-reject': {
-        delete (this as any)[`file_${msg.transferId}`];
+        this.cleanupSenderState(msg.transferId);
         useTransferStore.getState().updateTransfer(msg.transferId, {
           status: 'rejected',
           error: (msg.payload as any)?.reason || 'Transfer rejected'
@@ -825,12 +838,7 @@ export class TransferManager {
 
       case 'file-error': {
         const errorPayload = msg.payload as any;
-        // Also abort any active sender for this transfer (cancel on our side too)
-        const senderRef = this.activeSenders.get(msg.transferId);
-        if (senderRef) {
-          senderRef.abort = true;
-          this.activeSenders.delete(msg.transferId);
-        }
+        this.cleanupSenderState(msg.transferId);
         this.activeReceivers.delete(msg.transferId);
         chunkStorage.deleteSession(msg.transferId);
         useTransferStore.getState().updateTransfer(msg.transferId, {
