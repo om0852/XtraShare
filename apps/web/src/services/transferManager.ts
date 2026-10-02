@@ -38,6 +38,7 @@ export class TransferManager {
   private activeSenders = new Map<string, { abort: boolean }>();
   private processedOfferIds = new Set<string>();
   private senderFiles = new Map<string, File>();
+  private handledControlMessageKeys = new Set<string>();
 
   constructor() {
     // 1. WebRTC DataChannel binary & control listener
@@ -345,15 +346,15 @@ export class TransferManager {
     // Determine active transport mode
     const transportMode: TransportMode = await peerConnectionManager.getTransportMode(targetPeerId);
 
-    // Wait up to 5s for WebRTC DataChannel (also triggers negotiation)
+    // Wait up to 10s for WebRTC DataChannel (also triggers negotiation)
     let channel = peerConnectionManager.getDataChannel(targetPeerId);
     if (!channel || channel.readyState !== 'open') {
-      console.log(`[TransferManager] Awaiting WebRTC DataChannel with ${targetPeerId} (up to 5s)...`);
-      channel = (await this.waitForDataChannel(targetPeerId, 5000)) || undefined;
+      console.log(`[TransferManager] Awaiting WebRTC DataChannel with ${targetPeerId} (up to 10s)...`);
+      channel = (await this.waitForDataChannel(targetPeerId, 10000)) || undefined;
     }
 
     if (!channel || channel.readyState !== 'open') {
-      console.warn(`[TransferManager] DataChannel not ready after 5s. Switching to WebSocket fallback relay.`);
+      console.warn(`[TransferManager] DataChannel not ready after 10s. Switching to WebSocket fallback relay.`);
       await this.startSendingChunksViaRelay(targetPeerId, transferId, file, startSeq);
       return;
     }
@@ -693,6 +694,17 @@ export class TransferManager {
   }
 
   public handleControlMessage(peerId: string, msg: PeerMessage): void {
+    // Deduplicate control messages delivered via both WebRTC and Socket.IO
+    const dedupeKey = `${msg.transferId}_${msg.type}_${msg.timestamp || 0}`;
+    if (this.handledControlMessageKeys.has(dedupeKey)) {
+      return;
+    }
+    this.handledControlMessageKeys.add(dedupeKey);
+    if (this.handledControlMessageKeys.size > 200) {
+      const firstKey = this.handledControlMessageKeys.values().next().value;
+      if (firstKey) this.handledControlMessageKeys.delete(firstKey);
+    }
+
     const sender = useDeviceStore.getState().devices.get(peerId);
     const selfDevice = useDeviceStore.getState().selfDevice;
 
@@ -858,15 +870,17 @@ export class TransferManager {
             console.log(
               `[TransferManager] file-complete message arrived early (${receiver.receivedCount}/${receiver.totalChunks} chunks). Awaiting remaining DataChannel chunks...`
             );
-            if (!receiver.completionTimer) {
-              receiver.completionTimer = setTimeout(() => {
+            if (receiver.completionTimer) clearTimeout(receiver.completionTimer);
+            receiver.completionTimer = setTimeout(() => {
+              const inactiveTime = Date.now() - receiver.lastProgressUpdate;
+              if (inactiveTime >= 25000) {
                 console.warn(
-                  `[TransferManager] Completion timer expired for ${msg.transferId} (${receiver.receivedCount}/${receiver.totalChunks} chunks). Force finalizing...`
+                  `[TransferManager] Transfer stalled for 30s after file-complete (${receiver.receivedCount}/${receiver.totalChunks} chunks). Force finalizing available chunks...`
                 );
                 receiver.forceFinalize = true;
                 this.finalizeReceivedFile(msg.transferId);
-              }, 10000);
-            }
+              }
+            }, 30000);
           }
         }
         break;
