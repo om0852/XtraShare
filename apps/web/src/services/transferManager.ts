@@ -298,15 +298,10 @@ export class TransferManager {
         return resolve(channel);
       }
 
-      // Only kick off WebRTC negotiation if no connection exists yet
-      // DO NOT call ensureConnection if connection is already in progress —
-      // that would trigger a new offer/answer cycle and destabilize the existing channel
-      const existingPc = peerConnectionManager.getConnection(peerId);
-      if (!existingPc || existingPc.connectionState === 'closed' || existingPc.connectionState === 'failed') {
-        try {
-          peerConnectionManager.ensureConnection(peerId);
-        } catch {}
-      }
+      // Ensure WebRTC connection & DataChannel creation is initiated
+      try {
+        peerConnectionManager.ensureConnection(peerId);
+      } catch {}
 
       const timer = setTimeout(() => {
         clearInterval(checkInterval);
@@ -952,6 +947,12 @@ export class TransferManager {
         bytes[i] = binary.charCodeAt(i);
       }
       buffer = bytes.buffer;
+    } else if (chunk.data instanceof ArrayBuffer) {
+      buffer = chunk.data;
+    } else if (ArrayBuffer.isView(chunk.data)) {
+      buffer = chunk.data.buffer.slice(chunk.data.byteOffset, chunk.data.byteOffset + chunk.data.byteLength);
+    } else if (chunk.data && chunk.data.type === 'Buffer' && Array.isArray(chunk.data.data)) {
+      buffer = new Uint8Array(chunk.data.data).buffer;
     } else {
       buffer = chunk.data;
     }
@@ -999,10 +1000,14 @@ export class TransferManager {
   private handlePeerLeave(peerId: string): void {
     console.log(`[TransferManager] Handling peer disconnect for: ${peerId}`);
 
-    // If we are sending to this peer, pause and keep file ready for resumption
+    const devices = useDeviceStore.getState().devices;
     const transfers = useTransferStore.getState().transfers;
     for (const [id, t] of transfers.entries()) {
-      if (t.receiverId === peerId && (t.status === 'transferring' || t.status === 'offered')) {
+      // Check if receiver device is still in room (e.g. reconnected or updated ID)
+      const isReceiverStillInRoom = Array.from(devices.values()).some(
+        (d) => d.id === t.receiverId || (t.receiverName && d.name === t.receiverName)
+      );
+      if (t.receiverId === peerId && !isReceiverStillInRoom && (t.status === 'transferring' || t.status === 'offered')) {
         const senderControl = this.activeSenders.get(id);
         if (senderControl) {
           senderControl.abort = true;
@@ -1017,8 +1022,11 @@ export class TransferManager {
         console.log(`[TransferManager] Outbound transfer ${id} paused due to peer disconnect.`);
       }
 
-      // If we were receiving from this peer
-      if (t.senderId === peerId && t.status === 'transferring') {
+      // Check if sender device is still in room
+      const isSenderStillInRoom = Array.from(devices.values()).some(
+        (d) => d.id === t.senderId || (t.senderName && d.name === t.senderName)
+      );
+      if (t.senderId === peerId && !isSenderStillInRoom && t.status === 'transferring') {
         useTransferStore.getState().updateTransfer(id, {
           status: 'interrupted',
           interruptedAt: Date.now(),
@@ -1181,11 +1189,28 @@ export class TransferManager {
   }
 
   public sendControlMessage(targetPeerId: string, msg: PeerMessage): void {
+    const devices = useDeviceStore.getState().devices;
+    let activeId = targetPeerId;
+    if (!devices.has(activeId)) {
+      const transfer = useTransferStore.getState().transfers.get(msg.transferId);
+      const peerName = transfer
+        ? transfer.receiverId === targetPeerId
+          ? transfer.receiverName
+          : transfer.senderName
+        : undefined;
+      if (peerName) {
+        const found = Array.from(devices.values()).find((d) => d.name === peerName);
+        if (found) {
+          activeId = found.id;
+        }
+      }
+    }
+
     const json = JSON.stringify(msg);
     // 1. Try sending over direct WebRTC DataChannel
-    peerConnectionManager.sendData(targetPeerId, json);
+    peerConnectionManager.sendData(activeId, json);
     // 2. ALSO send reliably via Socket.IO signaling server relay
-    socketService.sendPeerMessage(targetPeerId, msg);
+    socketService.sendPeerMessage(activeId, msg);
   }
 }
 

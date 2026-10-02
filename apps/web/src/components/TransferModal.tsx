@@ -230,8 +230,22 @@ export const TransferModal: React.FC = () => {
                           <button
                             onClick={() => {
                               if (isSender) {
-                                // Sender: ask receiver where they left off, then resume from there
-                                transferManager.sendControlMessage(t.receiverId, {
+                                // Sender: resolve receiver device ID dynamically if recipient reconnected
+                                const devices = useDeviceStore.getState().devices;
+                                const targetPeer = devices.get(t.receiverId) || Array.from(devices.values()).find((d) => d.name === t.receiverName);
+                                const targetId = targetPeer ? targetPeer.id : t.receiverId;
+
+                                if (targetPeer && targetPeer.id !== t.receiverId) {
+                                  useTransferStore.getState().updateTransfer(t.id, { receiverId: targetPeer.id });
+                                }
+
+                                useTransferStore.getState().updateTransfer(t.id, {
+                                  status: 'transferring',
+                                  error: undefined
+                                });
+
+                                // Ask receiver where they left off, then resume from there
+                                transferManager.sendControlMessage(targetId, {
                                   type: 'file-resume-check',
                                   transferId: t.id,
                                   timestamp: Date.now(),

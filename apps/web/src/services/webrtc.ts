@@ -38,24 +38,18 @@ export class PeerConnectionManager {
       });
       this.setupDataChannel(peerId, channel);
     } else {
-      // Re-create data channel ONLY if PC is fully connected and channel is missing/closed.
-      // If PC is still 'connecting' (offer/answer in flight), DO NOT create a new DataChannel:
-      //   - The new DataChannel fires onnegotiationneeded
-      //   - signalingState is not 'stable' so the offer gets dropped (our guard rejects it)
-      //   - The DataChannel sits stuck in 'connecting' state forever → second transfer hangs
-      // The correct DataChannel will arrive via ondatachannel once negotiation completes.
-      if (pc.connectionState === 'connected') {
-        const existingChannel = this.dataChannels.get(peerId);
-        if (!existingChannel || existingChannel.readyState === 'closed') {
+      // Re-create data channel if missing/closed and PC is in a state ready to create channels
+      const existingChannel = this.dataChannels.get(peerId);
+      if (!existingChannel || existingChannel.readyState === 'closed') {
+        if (pc.signalingState === 'stable' || pc.connectionState === 'new' || pc.connectionState === 'connected') {
           try {
             const channel = pc.createDataChannel('xtrashare-data', { ordered: true });
             this.setupDataChannel(peerId, channel);
           } catch (e) {
-            console.warn('Could not re-create DataChannel on connected pc:', e);
+            console.warn('Could not create DataChannel on pc:', e);
           }
         }
       }
-      // If PC is 'connecting': just return the PC, DataChannel will arrive via ondatachannel
     }
     return pc;
   }
