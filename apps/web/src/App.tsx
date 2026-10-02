@@ -13,16 +13,37 @@ import { SettingsModal } from './components/SettingsModal.js';
 import { socketService } from './services/socket.js';
 import { useUIStore } from './store/uiStore.js';
 import { useDeviceStore } from './store/deviceStore.js';
+import { useTransferStore } from './store/transferStore.js';
 import { DeviceInfo } from '@xtrashare/protocol';
 import { Laptop, Clock, Clipboard, FileText } from 'lucide-react';
 
 export const App: React.FC = () => {
   const { activeTab, viewMode, setActiveTab } = useUIStore();
   const setTargetDeviceId = useDeviceStore((state) => state.setTargetDeviceId);
+  const transfers = useTransferStore((state) => state.transfers);
 
   useEffect(() => {
     socketService.connect();
   }, []);
+
+  // Prevent accidental page refresh / close during active transfers
+  useEffect(() => {
+    const hasActiveTransfer = Array.from(transfers.values()).some(
+      (t) => t.status === 'transferring' || t.status === 'offered' || t.status === 'accepted'
+    );
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasActiveTransfer) {
+        const msg = 'A file transfer is in progress. Refreshing will cancel the transfer. Are you sure?';
+        e.preventDefault();
+        e.returnValue = msg;
+        return msg;
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [transfers]);
 
   const handleSelectDevice = (device: DeviceInfo) => {
     setTargetDeviceId(device.id);

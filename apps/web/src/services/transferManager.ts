@@ -276,15 +276,22 @@ export class TransferManager {
 
   /**
    * Helper to wait for DataChannel to open before streaming, or time out to relay.
+   * Also triggers WebRTC connection negotiation if not already started.
    */
-  private waitForDataChannel(peerId: string, timeoutMs = 3500): Promise<RTCDataChannel | null> {
+  private waitForDataChannel(peerId: string, timeoutMs = 5000): Promise<RTCDataChannel | null> {
     return new Promise((resolve) => {
       const channel = peerConnectionManager.getDataChannel(peerId);
       if (channel && channel.readyState === 'open') {
         return resolve(channel);
       }
 
+      // Kick off WebRTC negotiation proactively
+      try {
+        peerConnectionManager.ensureConnection(peerId);
+      } catch {}
+
       const timer = setTimeout(() => {
+        clearInterval(checkInterval);
         resolve(null);
       }, timeoutMs);
 
@@ -295,7 +302,7 @@ export class TransferManager {
           clearInterval(checkInterval);
           resolve(ch);
         }
-      }, 100);
+      }, 80);
     });
   }
 
@@ -309,18 +316,28 @@ export class TransferManager {
     file: File,
     startSeq = 0
   ): Promise<void> {
+    // CRITICAL: Abort any existing sender for this transferId before starting a new one
+    // This prevents duplicate sends when retry/resume triggers a second sender
+    const existingSender = this.activeSenders.get(transferId);
+    if (existingSender) {
+      console.log(`[TransferManager] Aborting previous sender for ${transferId} before starting new one`);
+      existingSender.abort = true;
+      // Small pause to allow in-flight async operations to notice the abort
+      await new Promise((r) => setTimeout(r, 120));
+    }
+
     // Determine active transport mode
     const transportMode: TransportMode = await peerConnectionManager.getTransportMode(targetPeerId);
 
-    // Wait briefly for WebRTC DataChannel if it is still negotiating
+    // Wait up to 5s for WebRTC DataChannel (also triggers negotiation)
     let channel = peerConnectionManager.getDataChannel(targetPeerId);
     if (!channel || channel.readyState !== 'open') {
-      console.log(`[TransferManager] Awaiting WebRTC DataChannel with ${targetPeerId}...`);
-      channel = (await this.waitForDataChannel(targetPeerId, 2000)) || undefined;
+      console.log(`[TransferManager] Awaiting WebRTC DataChannel with ${targetPeerId} (up to 5s)...`);
+      channel = (await this.waitForDataChannel(targetPeerId, 5000)) || undefined;
     }
 
     if (!channel || channel.readyState !== 'open') {
-      console.warn(`[TransferManager] DataChannel not ready. Switching to WebSocket fallback relay.`);
+      console.warn(`[TransferManager] DataChannel not ready after 5s. Switching to WebSocket fallback relay.`);
       await this.startSendingChunksViaRelay(targetPeerId, transferId, file, startSeq);
       return;
     }
@@ -458,7 +475,7 @@ export class TransferManager {
 
   /**
    * WebSocket relay fallback chunk streamer.
-   * Supports resumable streaming starting from any sequence index.
+   * Uses the SAME CHUNK_SIZE as WebRTC so receiver totalChunks count stays consistent.
    */
   public async startSendingChunksViaRelay(
     targetPeerId: string,
@@ -466,6 +483,13 @@ export class TransferManager {
     file: File,
     startSeq = 0
   ): Promise<void> {
+    // Abort any existing sender first
+    const existingSender = this.activeSenders.get(transferId);
+    if (existingSender) {
+      existingSender.abort = true;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
     useTransferStore.getState().updateTransfer(transferId, {
       status: 'transferring',
       transportMode: 'websocket-relay',
@@ -475,22 +499,33 @@ export class TransferManager {
     const senderControl = { abort: false };
     this.activeSenders.set(transferId, senderControl);
 
-    const RELAY_CHUNK = 32768; // 32KB per packet for smooth WebSocket framing
-    const totalChunks = Math.ceil(file.size / RELAY_CHUNK);
-    let bytesSent = startSeq * RELAY_CHUNK;
+    // Use same CHUNK_SIZE as WebRTC so receiver totalChunks is consistent
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let bytesSent = startSeq * CHUNK_SIZE;
     let lastTime = Date.now();
     let lastBytes = bytesSent;
 
     for (let seq = startSeq; seq < totalChunks; seq++) {
       if (senderControl.abort) {
-        console.log(`[TransferManager] Relay sending of ${transferId} paused at chunk ${seq}`);
+        console.log(`[TransferManager] Relay sending of ${transferId} aborted at chunk ${seq}`);
         return;
       }
 
-      const start = seq * RELAY_CHUNK;
-      const end = Math.min(start + RELAY_CHUNK, file.size);
-      const slice = file.slice(start, end);
-      const buffer = await slice.arrayBuffer();
+      // While relay is running, keep checking if WebRTC has opened — switch if ready
+      if (seq > 0 && seq % 50 === 0) {
+        const ch = peerConnectionManager.getDataChannel(targetPeerId);
+        if (ch && ch.readyState === 'open') {
+          console.log(`%c[TransferManager] WebRTC DataChannel opened during relay! Switching transport at chunk ${seq}`, 'color: #10b981; font-weight: bold');
+          senderControl.abort = true;
+          // Hand off to WebRTC sender from current seq
+          await this.startSendingChunks(targetPeerId, transferId, file, seq);
+          return;
+        }
+      }
+
+      const start = seq * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const buffer = await file.slice(start, end).arrayBuffer();
 
       // Convert chunk to base64 for reliable JSON socket transit
       let binary = '';
@@ -519,7 +554,7 @@ export class TransferManager {
 
       const now = Date.now();
       const elapsed = (now - lastTime) / 1000;
-      if (elapsed >= 0.25 || seq === totalChunks - 1) {
+      if (elapsed >= 0.2 || seq === totalChunks - 1) {
         const speed = Math.round((bytesSent - lastBytes) / elapsed);
         const remainingBytes = file.size - bytesSent;
         const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
@@ -535,14 +570,13 @@ export class TransferManager {
         lastBytes = bytesSent;
       }
 
-      // Small 5ms pause every 3 chunks to prevent flooding browser event loop
-      if (seq % 3 === 0) {
-        await new Promise((r) => setTimeout(r, 6));
+      // Small yield every 4 chunks to keep event loop responsive
+      if (seq % 4 === 0) {
+        await new Promise((r) => setTimeout(r, 5));
       }
     }
 
     this.activeSenders.delete(transferId);
-    delete (this as any)[`file_${transferId}`];
 
     this.sendControlMessage(targetPeerId, {
       type: 'file-complete',
@@ -804,6 +838,11 @@ export class TransferManager {
     const receiver = this.activeReceivers.get(frame.transferId);
     if (!receiver) return;
 
+    // Deduplication: skip already-received sequences
+    if (receiver.chunks[frame.sequence] !== undefined && receiver.chunks[frame.sequence] !== null) {
+      return;
+    }
+
     receiver.chunks[frame.sequence] = frame.payload;
     receiver.receivedBytes += frame.payload.byteLength;
     receiver.receivedCount++;
@@ -858,6 +897,15 @@ export class TransferManager {
   private handleRelayChunk(chunk: any): void {
     if (!chunk.data || !chunk.transferId) return;
 
+    const receiver = this.activeReceivers.get(chunk.transferId);
+    if (!receiver) return;
+
+    // Deduplication: skip if this sequence was already received
+    if (receiver.chunks[chunk.sequence] !== undefined && receiver.chunks[chunk.sequence] !== null) {
+      console.debug(`[TransferManager] Relay: duplicate chunk ${chunk.sequence} for ${chunk.transferId}, skipping`);
+      return;
+    }
+
     let buffer: ArrayBuffer;
     if (typeof chunk.data === 'string') {
       const binary = atob(chunk.data);
@@ -870,9 +918,6 @@ export class TransferManager {
       buffer = chunk.data;
     }
 
-    const receiver = this.activeReceivers.get(chunk.transferId);
-    if (!receiver) return;
-
     receiver.chunks[chunk.sequence] = buffer;
     receiver.receivedBytes += buffer.byteLength;
     receiver.receivedCount++;
@@ -883,7 +928,10 @@ export class TransferManager {
     const now = Date.now();
     const elapsed = (now - receiver.lastProgressUpdate) / 1000;
 
-    if (elapsed >= 0.25 || receiver.receivedCount === chunk.totalChunks) {
+    // Use receiver.totalChunks (set from file-offer) not chunk.totalChunks (may mismatch)
+    const totalForCompletion = receiver.totalChunks;
+
+    if (elapsed >= 0.2 || receiver.receivedCount === totalForCompletion) {
       const speed = Math.round((receiver.receivedBytes - receiver.lastBytes) / elapsed);
       const remainingBytes = receiver.offer.size - receiver.receivedBytes;
       const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
@@ -902,7 +950,7 @@ export class TransferManager {
       receiver.lastBytes = receiver.receivedBytes;
     }
 
-    if (receiver.receivedCount === chunk.totalChunks) {
+    if (receiver.receivedCount === totalForCompletion) {
       this.finalizeReceivedFile(chunk.transferId);
     }
   }
