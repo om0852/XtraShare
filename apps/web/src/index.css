@@ -1,0 +1,284 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #000000;
+    color: #f4f4f5;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  }
+}
+
+/* ===================================================
+   Ultra-Premium Black & White Monochrome Design System
+   =================================================== */
+
+/* Monochromatic Glass Surfaces */
+.mono-panel {
+  background: rgba(10, 10, 12, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mono-card {
+  background: rgba(18, 18, 22, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mono-card-hover {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.mono-card-hover:hover {
+  background: rgba(28, 28, 34, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -8px rgba(255, 255, 255, 0.12);
+}
+
+/* Crisp Monochrome Glows */
+.mono-glow {
+  box-shadow: 0 0 35px -5px rgba(255, 255, 255, 0.18);
+}
+
+.mono-glow-sm {
+  box-shadow: 0 0 15px -2px rgba(255, 255, 255, 0.15);
+}
+
+.mono-border-glow {
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 25px rgba(255, 255, 255, 0.2);
+}
+
+/* Ambient Monochrome Glows */
+.ambient-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Sleek Monochrome Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 10, 10, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+/* ===================================================
+   Custom High-Impact Motion & Visual Animations
+   =================================================== */
+
+/* 1. Radar 360-Degree Sweep */
+@keyframes radarSweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-radar-sweep {
+  animation: radarSweep 6s linear infinite;
+  transform-origin: center center;
+}
+
+/* 2. Concentric Radar Pulse */
+@keyframes radarPulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+    border-color: rgba(255, 255, 255, 0.8);
+  }
+  50% {
+    opacity: 0.4;
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+    border-color: rgba(255, 255, 255, 0);
+  }
+}
+
+.animate-radar-pulse {
+  animation: radarPulse 3s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* 3. File Sending Photon Stream (Laser particle path) */
+@keyframes beamDash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.animate-beam-dash {
+  stroke-dasharray: 8 6;
+  animation: beamDash 1.2s linear infinite;
+}
+
+/* 4. Target Device Lock-On Ring */
+@keyframes lockOn {
+  0% {
+    transform: rotate(0deg) scale(1);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+    box-shadow: 0 0 25px rgba(255, 255, 255, 0.5);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+  }
+}
+
+.animate-lock-on {
+  animation: lockOn 4s linear infinite;
+}
+
+/* 5. Room Join Hyperspace Burst */
+@keyframes roomWarp {
+  0% {
+    transform: scale(0.85);
+    opacity: 0;
+    filter: blur(8px);
+  }
+  50% {
+    opacity: 0.9;
+    filter: blur(0);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-room-warp {
+  animation: roomWarp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* 6. Shimmer across progress bars & badges */
+@keyframes monoShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-mono-shimmer {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.25) 50%, rgba(255, 255, 255, 0.05) 100%);
+  background-size: 200% 100%;
+  animation: monoShimmer 2.5s infinite;
+}
+
+/* 7. Camera Laser Scanner */
+@keyframes laserScan {
+  0% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateY(190px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+}
+
+.animate-laser-scan {
+  animation: laserScan 2s ease-in-out infinite;
+}
+
+/* 8. Gentle Node Float */
+@keyframes gentleFloat {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.animate-float {
+  animation: gentleFloat 4s ease-in-out infinite;
+}
+
+/* 9. Quantum Room Join Pulse & Ripple */
+@keyframes quantumRipple {
+  0% {
+    transform: scale(0.7);
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.animate-quantum-ripple {
+  animation: quantumRipple 2.2s cubic-bezier(0.1, 0.9, 0.2, 1) infinite;
+}
+
+/* 10. Receiving Beacon Ping */
+@keyframes beaconPing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 20px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.animate-beacon-ping {
+  animation: beaconPing 2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* 11. HUD Scanline Sweep */
+@keyframes hudScan {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
+}
+
+.animate-hud-scan {
+  background: linear-gradient(rgba(255, 255, 255, 0) 50%, rgba(255, 255, 255, 0.04) 50%), linear-gradient(90deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01), rgba(255, 255, 255, 0.03));
+  background-size: 100% 4px, 6px 100%;
+}
+

@@ -1,0 +1,17 @@
+{
+  "name": "XtraShare Cross-Device Transfer",
+  "short_name": "XtraShare",
+  "description": "LAN-first AirDrop/LocalSend-style cross-device P2P file, text & clipboard sharing.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#0b1120",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
