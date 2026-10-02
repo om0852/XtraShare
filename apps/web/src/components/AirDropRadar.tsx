@@ -326,12 +326,12 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
           )}
         </div>
 
-        <div className="mt-2.5 text-center">
-          <span className="text-xs font-bold text-white tracking-wide flex items-center justify-center gap-1.5">
-            {selfDevice?.name || 'This Device'}
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-white text-black font-mono font-black">YOU</span>
+        <div className="mt-1.5 text-center max-w-[80px] sm:max-w-[110px]">
+          <span className="text-[10px] sm:text-xs font-bold text-white tracking-wide flex items-center justify-center gap-1 flex-wrap">
+            <span className="truncate max-w-[60px] sm:max-w-[85px]">{selfDevice?.name || 'This Device'}</span>
+            <span className="text-[9px] px-1 py-px rounded bg-white text-black font-mono font-black flex-shrink-0">YOU</span>
           </span>
-          <span className="text-[10px] text-zinc-400 font-mono block uppercase tracking-wider">{selfDevice?.platform || 'LAN Host'}</span>
+          <span className="text-[9px] text-zinc-500 font-mono block truncate">{selfDevice?.platform || ''}</span>
         </div>
       </div>
 
@@ -386,26 +386,21 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
                 />
               </div>
 
-              {/* Device Name and Platform */}
-              <div className="mt-1.5 text-center max-w-[100px] sm:max-w-[120px]">
-                <p className="text-xs font-bold text-white truncate group-hover:text-zinc-200 transition-colors">
-                  {device.name}
-                </p>
-                <p className="text-[10px] text-zinc-400 font-mono truncate">
-                  {device.platform} • {device.browser}
-                </p>
-              </div>
-
-              {/* Tap to Send Monochromatic Badge */}
-              <div
-                className={`mt-1 flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full transition-all ${
-                  isSelected
-                    ? 'bg-white text-black font-black opacity-100 shadow-sm'
-                    : 'bg-zinc-800 text-zinc-300 opacity-0 group-hover:opacity-100'
-                }`}
-              >
-                <Send className="w-2.5 h-2.5" />
-                <span>{isSelected ? 'SELECTED' : 'SEND'}</span>
+              {/* Device Name + Send Badge (compact, no overflow) */}
+              <div className="mt-1 text-center" style={{ width: `${Math.min(90, radius * 0.65)}px` }}>
+                <p className="text-[10px] sm:text-xs font-bold text-white truncate">{device.name}</p>
+                <p className="text-[8px] sm:text-[9px] text-zinc-500 font-mono truncate">{device.platform}</p>
+                {/* SEND / SELECTED inline badge */}
+                <div
+                  className={`mt-0.5 inline-flex items-center gap-0.5 text-[8px] sm:text-[9px] font-mono px-1.5 py-px rounded-full transition-all ${
+                    isSelected
+                      ? 'bg-white text-black font-black shadow-sm'
+                      : 'bg-zinc-900/80 text-zinc-400 opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  <Send className="w-2 h-2" />
+                  <span>{isSelected ? 'SELECTED' : 'SEND'}</span>
+                </div>
               </div>
             </div>
           );

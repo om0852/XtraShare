@@ -213,6 +213,10 @@ export class PeerConnectionManager {
     return this.dataChannels.get(peerId);
   }
 
+  public getConnection(peerId: string): RTCPeerConnection | undefined {
+    return this.connections.get(peerId);
+  }
+
   public async sendData(peerId: string, data: string | ArrayBuffer): Promise<boolean> {
     const channel = this.getDataChannel(peerId);
     if (channel && channel.readyState === 'open') {

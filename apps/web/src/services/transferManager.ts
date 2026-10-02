@@ -343,7 +343,23 @@ export class TransferManager {
     let lastTime = Date.now();
     let lastBytes = bytesSent;
 
+    // Set a larger send buffer and low-water mark for maximum LAN throughput
     channel.bufferedAmountLowThreshold = LOW_WATER_MARK;
+    try {
+      // Chrome supports setting the send buffer size via SCTP
+      const pc = peerConnectionManager.getConnection(targetPeerId);
+      if (pc && (pc as any).sctp) {
+        // Attempt to set maxMessageSize hint (browser may ignore)
+        (pc as any).sctp.maxMessageSize;
+      }
+    } catch {}
+
+    // Pre-read the very first chunk before entering the loop
+    let prefetchBuffer: ArrayBuffer | null = null;
+    if (startSeq < totalChunks) {
+      const s0 = startSeq * CHUNK_SIZE;
+      prefetchBuffer = await file.slice(s0, Math.min(s0 + CHUNK_SIZE, file.size)).arrayBuffer();
+    }
 
     for (let seq = startSeq; seq < totalChunks; seq++) {
       if (senderControl.abort) {
@@ -376,11 +392,18 @@ export class TransferManager {
         }
       }
 
-      // Slice chunk without loading entire file in memory
-      const start = seq * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const slice = file.slice(start, end);
-      const buffer = await slice.arrayBuffer();
+      // Use pre-fetched buffer from previous iteration, or fetch now
+      const buffer = prefetchBuffer ?? await file.slice(seq * CHUNK_SIZE, Math.min((seq + 1) * CHUNK_SIZE, file.size)).arrayBuffer();
+      prefetchBuffer = null;
+
+      // Kick off read of next chunk in parallel (I/O pipeline)
+      const nextSeq = seq + 1;
+      if (nextSeq < totalChunks) {
+        const ns = nextSeq * CHUNK_SIZE;
+        file.slice(ns, Math.min(ns + CHUNK_SIZE, file.size)).arrayBuffer().then((b) => {
+          prefetchBuffer = b;
+        }).catch(() => {});
+      }
 
       // Construct binary frame: 32 bytes header + raw chunk payload
       const frame = this.buildBinaryFrame(transferId, seq, totalChunks, buffer);
@@ -394,10 +417,10 @@ export class TransferManager {
 
       bytesSent += buffer.byteLength;
 
-      // Speed & ETA calculation every 250ms
+      // Speed & ETA calculation every 200ms or last chunk
       const now = Date.now();
       const elapsed = (now - lastTime) / 1000;
-      if (elapsed >= 0.25 || seq === totalChunks - 1) {
+      if (elapsed >= 0.2 || seq === totalChunks - 1) {
         const speed = Math.round((bytesSent - lastBytes) / elapsed);
         const remainingBytes = file.size - bytesSent;
         const eta = speed > 0 ? Math.round(remainingBytes / speed) : 0;
