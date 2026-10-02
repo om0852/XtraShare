@@ -10,7 +10,6 @@ import { TransferHistory } from './components/TransferHistory.js';
 import { QRCodeModal } from './components/QRCodeModal.js';
 import { QRScannerModal } from './components/QRScannerModal.js';
 import { SettingsModal } from './components/SettingsModal.js';
-import { RoomJoinBanner } from './components/RoomJoinBanner.js';
 import { socketService } from './services/socket.js';
 import { useUIStore } from './store/uiStore.js';
 import { useDeviceStore } from './store/deviceStore.js';
@@ -47,9 +46,6 @@ export const App: React.FC = () => {
 
       {/* Main Top Header */}
       <Header />
-
-      {/* Animated Room Join & Connection Warp Notification */}
-      <RoomJoinBanner />
 
       {/* Main Responsive Container (Mobile, Tablet, Laptop, 2XL Ultrawide) */}
       <main className="flex-1 w-full max-w-6xl 2xl:max-w-[1550px] mx-auto px-4 sm:px-6 lg:px-8 py-5 z-10">

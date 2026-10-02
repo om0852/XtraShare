@@ -105,7 +105,7 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-4xl 2xl:max-w-5xl mx-auto h-[380px] sm:h-[450px] lg:h-[520px] 2xl:h-[570px] flex items-center justify-center overflow-hidden rounded-3xl mono-panel border border-white/15 p-4 sm:p-6 my-4 shadow-2xl animate-room-warp"
+      className="relative w-full max-w-4xl 2xl:max-w-5xl mx-auto h-[350px] sm:h-[450px] lg:h-[520px] 2xl:h-[570px] flex items-center justify-center overflow-hidden rounded-3xl mono-panel border border-white/15 p-3 sm:p-6 my-2 sm:my-4 shadow-2xl animate-room-warp"
     >
       {/* 1. Concentric Black & White Radar Rings */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -143,13 +143,13 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
       </div>
 
       {/* 2. Top HUD Room Status Indicator */}
-      <div className="absolute top-4 left-4 sm:left-6 z-30 flex items-center space-x-2">
-        <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-black/85 border border-white/20 text-[11px] font-mono text-zinc-300 backdrop-blur-md shadow-lg">
-          <ShieldCheck className="w-3.5 h-3.5 text-white" />
+      <div className="absolute top-3 left-3 sm:top-4 sm:left-6 z-30 flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-black/85 border border-white/20 text-[10px] sm:text-[11px] font-mono text-zinc-300 backdrop-blur-md shadow-lg">
+          <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-white" />
           <span>ROOM: <strong className="text-white tracking-widest">{currentRoomId || '---'}</strong></span>
           <span className="text-zinc-600">•</span>
           <span className="text-white font-extrabold flex items-center gap-1">
-            <Radio className="w-3 h-3 text-white animate-pulse" />
+            <Radio className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white animate-pulse" />
             {deviceList.length + 1} ONLINE
           </span>
         </div>
@@ -157,25 +157,25 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
 
       {/* 3. Top Right Transfer HUD Indicator */}
       {(isSendingActive || isReceivingActive) && (
-        <div className="absolute top-4 right-4 sm:right-6 z-30 flex items-center space-x-2 animate-fade-in">
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-6 z-30 flex items-center space-x-2 animate-fade-in">
           {isInterrupted ? (
-            <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-amber-400 text-black text-[11px] font-mono font-black shadow-[0_0_20px_rgba(251,191,36,0.4)]">
-              <span className="w-2 h-2 rounded-full bg-black animate-ping" />
+            <div className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-amber-400 text-black text-[10px] sm:text-[11px] font-mono font-black shadow-[0_0_20px_rgba(251,191,36,0.4)]">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-black animate-ping" />
               <span>RECONNECTING...</span>
-              <span className="bg-black text-amber-400 px-1.5 py-0.2 rounded text-[10px] font-bold">
+              <span className="bg-black text-amber-400 px-1.5 py-0.2 rounded text-[9px] sm:text-[10px] font-bold">
                 {transferProgress}%
               </span>
             </div>
           ) : (
-            <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white text-black text-[11px] font-mono font-black shadow-[0_0_20px_rgba(255,255,255,0.3)]">
-              <Activity className="w-3.5 h-3.5 animate-spin" />
+            <div className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-white text-black text-[10px] sm:text-[11px] font-mono font-black shadow-[0_0_20px_rgba(255,255,255,0.3)]">
+              <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
               <span>{isSendingActive ? `SENDING ${transferProgress}%` : `RECEIVING ${transferProgress}%`}</span>
               {activeTransfer?.transportMode === 'lan-p2p' ? (
-                <span className="font-mono text-[9px] bg-black text-emerald-400 border border-emerald-400/40 px-1.5 py-0.2 rounded font-bold">
-                  LAN DIRECT
+                <span className="font-mono text-[8px] sm:text-[9px] bg-black text-emerald-400 border border-emerald-400/40 px-1 py-0.2 rounded font-bold">
+                  LAN
                 </span>
               ) : activeTransfer?.speed ? (
-                <span className="font-mono text-[10px] bg-black text-white px-1.5 py-0.2 rounded font-bold">
+                <span className="font-mono text-[9px] sm:text-[10px] bg-black text-white px-1 sm:px-1.5 py-0.2 rounded font-bold">
                   {formatBytes(activeTransfer.speed)}/s
                 </span>
               ) : null}
