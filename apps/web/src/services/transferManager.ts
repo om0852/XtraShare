@@ -690,10 +690,18 @@ export class TransferManager {
           return;
         }
 
-        // 2. If already processed and actively transferring, ignore duplicate ping
+        // 2. If already processed in a terminal state (cancelled/failed/rejected/completed), ignore duplicate offer
         const existingTransfer = useTransferStore.getState().transfers.get(msg.transferId);
-        if (existingTransfer && existingTransfer.status === 'transferring') {
-          return;
+        if (existingTransfer) {
+          if (existingTransfer.status === 'transferring' || existingTransfer.status === 'accepted') {
+            // Already in progress — ignore
+            return;
+          }
+          if (existingTransfer.status === 'completed') {
+            // Already done — ignore duplicate
+            return;
+          }
+          // For cancelled/failed/rejected: allow re-offer (peer may have retried)
         }
 
         this.processedOfferIds.add(msg.transferId);
@@ -729,12 +737,23 @@ export class TransferManager {
       }
 
       case 'file-accept': {
+        // Guard: ignore if transfer was already cancelled or failed (race condition)
+        const currentTransfer = useTransferStore.getState().transfers.get(msg.transferId);
+        if (currentTransfer && (currentTransfer.status === 'cancelled' || currentTransfer.status === 'failed' || currentTransfer.status === 'rejected')) {
+          console.warn(`[TransferManager] Ignoring file-accept for ${msg.transferId} — already ${currentTransfer.status}`);
+          break;
+        }
+        // Guard: don't start duplicate sender if already transferring
+        if (this.activeSenders.has(msg.transferId)) {
+          console.warn(`[TransferManager] Ignoring duplicate file-accept for ${msg.transferId} — sender already active`);
+          break;
+        }
         const file = this.senderFiles.get(msg.transferId) || (this as any)[`file_${msg.transferId}`] as File;
         if (file) {
           console.log(`[TransferManager] Recipient accepted transfer ${msg.transferId}. Starting stream.`);
           this.startSendingChunks(peerId, msg.transferId, file, 0);
         } else {
-          console.warn(`[TransferManager] Cannot start stream for ${msg.transferId}: local file not found`);
+          console.warn(`[TransferManager] Cannot start stream for ${msg.transferId}: local file not found (may have been cancelled)`);
         }
         break;
       }
@@ -762,6 +781,12 @@ export class TransferManager {
 
       case 'file-resume': {
         const resumePayload = msg.payload as FileResumePayload;
+        // Guard: don't resume if transfer was cancelled/failed on our side
+        const resumeTransfer = useTransferStore.getState().transfers.get(msg.transferId);
+        if (resumeTransfer && (resumeTransfer.status === 'cancelled' || resumeTransfer.status === 'failed')) {
+          console.warn(`[TransferManager] Ignoring file-resume for ${msg.transferId} — already ${resumeTransfer.status}`);
+          break;
+        }
         const file = this.senderFiles.get(msg.transferId) || (this as any)[`file_${msg.transferId}`] as File;
         if (file) {
           const nextSeq = (resumePayload.lastReceivedChunk ?? -1) + 1;
@@ -800,12 +825,18 @@ export class TransferManager {
 
       case 'file-error': {
         const errorPayload = msg.payload as any;
-        useTransferStore.getState().updateTransfer(msg.transferId, {
-          status: 'failed',
-          error: errorPayload?.message || 'Transfer failed'
-        });
+        // Also abort any active sender for this transfer (cancel on our side too)
+        const senderRef = this.activeSenders.get(msg.transferId);
+        if (senderRef) {
+          senderRef.abort = true;
+          this.activeSenders.delete(msg.transferId);
+        }
         this.activeReceivers.delete(msg.transferId);
         chunkStorage.deleteSession(msg.transferId);
+        useTransferStore.getState().updateTransfer(msg.transferId, {
+          status: 'failed',
+          error: errorPayload?.message || 'Transfer cancelled by peer'
+        });
         break;
       }
 
