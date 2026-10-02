@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: xtrashare
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: NODE_ENV
+        value: production
+      - key: SSL_ENABLED
+        value: false
