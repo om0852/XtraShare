@@ -15,6 +15,7 @@ interface UIState {
   connectionStatus: ConnectionStatus;
   lanIp: string;
   serverPort: number;
+  autoAccept: boolean;
 
   setActiveTab: (tab: ActiveTab) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -25,6 +26,7 @@ interface UIState {
   setCurrentRoomId: (roomId: string) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
   setServerNetworkInfo: (lanIp: string, serverPort: number) => void;
+  setAutoAccept: (v: boolean) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -38,6 +40,7 @@ export const useUIStore = create<UIState>((set) => ({
   connectionStatus: 'connecting',
   lanIp: window.location.hostname,
   serverPort: window.location.port ? parseInt(window.location.port, 10) : 3000,
+  autoAccept: false,
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setViewMode: (viewMode) => set({ viewMode }),
@@ -47,5 +50,6 @@ export const useUIStore = create<UIState>((set) => ({
   setRoomModalOpen: (isRoomModalOpen) => set({ isRoomModalOpen }),
   setCurrentRoomId: (currentRoomId) => set({ currentRoomId }),
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
-  setServerNetworkInfo: (lanIp, serverPort) => set({ lanIp, serverPort })
+  setServerNetworkInfo: (lanIp, serverPort) => set({ lanIp, serverPort }),
+  setAutoAccept: (autoAccept) => set({ autoAccept })
 }));

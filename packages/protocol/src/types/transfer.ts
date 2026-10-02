@@ -57,6 +57,7 @@ export type PeerMessageType =
   | 'file-ack'
   | 'file-pause'
   | 'file-resume'
+  | 'file-resume-check'
   | 'file-complete'
   | 'file-error'
   | 'text'

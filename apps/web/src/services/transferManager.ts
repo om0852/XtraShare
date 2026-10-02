@@ -34,6 +34,7 @@ export class TransferManager {
   private activeReceivers = new Map<string, ActiveReceiverSession>();
   private activeSenders = new Map<string, { abort: boolean }>();
   private processedOfferIds = new Set<string>();
+  private senderFiles = new Map<string, File>();
 
   constructor() {
     // 1. WebRTC DataChannel binary & control listener
@@ -110,6 +111,7 @@ export class TransferManager {
     peerConnectionManager.ensureConnection(targetPeerId);
 
     // Save local file reference for when recipient accepts or resumes
+    this.senderFiles.set(transferId, file);
     (this as any)[`file_${transferId}`] = file;
 
     // Send file-offer control message reliably (both WebRTC & WebSocket signaling)
@@ -253,6 +255,7 @@ export class TransferManager {
     }
 
     this.activeReceivers.delete(transferId);
+    this.senderFiles.delete(transferId);
     delete (this as any)[`file_${transferId}`];
     chunkStorage.deleteSession(transferId);
 
@@ -274,7 +277,7 @@ export class TransferManager {
   /**
    * Helper to wait for DataChannel to open before streaming, or time out to relay.
    */
-  private waitForDataChannel(peerId: string, timeoutMs = 2000): Promise<RTCDataChannel | null> {
+  private waitForDataChannel(peerId: string, timeoutMs = 3500): Promise<RTCDataChannel | null> {
     return new Promise((resolve) => {
       const channel = peerConnectionManager.getDataChannel(peerId);
       if (channel && channel.readyState === 'open') {
@@ -474,9 +477,15 @@ export class TransferManager {
       }
       const base64Data = btoa(binary);
 
+      // Dynamically resolve target peer ID in case peer reconnected with a new socket ID
+      const currentDevices = useDeviceStore.getState().devices;
+      const targetPeer = currentDevices.get(targetPeerId) ||
+        Array.from(currentDevices.values()).find((d) => d.name === useTransferStore.getState().transfers.get(transferId)?.receiverName);
+      const activeToId = targetPeer ? targetPeer.id : targetPeerId;
+
       socketService.sendRelayChunk({
         from: '',
-        to: targetPeerId,
+        to: activeToId,
         transferId,
         sequence: seq,
         totalChunks,
@@ -603,8 +612,34 @@ export class TransferManager {
 
     switch (msg.type) {
       case 'file-offer': {
-        const offer = msg.payload as FileOfferPayload;
-        if (this.processedOfferIds.has(msg.transferId)) return;
+        const offer = msg.payload as FileOfferPayload & { isResume?: boolean };
+
+        // 1. If we already have an active receiver session for this transferId, respond with resume
+        const existingSession = this.activeReceivers.get(msg.transferId);
+        if (existingSession) {
+          console.log(`[TransferManager] Auto-acknowledging offer for already active session "${offer.name}"`);
+          const lastSeq = existingSession.lastSequence ?? -1;
+          this.sendControlMessage(peerId, {
+            type: 'file-resume',
+            transferId: msg.transferId,
+            timestamp: Date.now(),
+            payload: {
+              transferId: msg.transferId,
+              lastReceivedChunk: lastSeq,
+              lastReceivedOffset: existingSession.receivedBytes,
+              newReceiverId: selfDevice?.id,
+              newReceiverName: selfDevice?.name
+            }
+          });
+          return;
+        }
+
+        // 2. If already processed and actively transferring, ignore duplicate ping
+        const existingTransfer = useTransferStore.getState().transfers.get(msg.transferId);
+        if (existingTransfer && existingTransfer.status === 'transferring') {
+          return;
+        }
+
         this.processedOfferIds.add(msg.transferId);
 
         const transfer: Transfer = {
@@ -624,23 +659,54 @@ export class TransferManager {
         };
 
         useTransferStore.getState().addTransfer(transfer);
-        useTransferStore.getState().addPendingOffer({ transfer, fileOffer: offer });
-        console.log(`[TransferManager] Received file offer "${offer.name}" (${offer.size} bytes) from ${transfer.senderName}`);
+
+        // Auto-accept if setting enabled
+        if (useUIStore.getState().autoAccept) {
+          console.log(`[TransferManager] Auto-accepting incoming file "${offer.name}"`);
+          useTransferStore.getState().addPendingOffer({ transfer, fileOffer: offer });
+          this.acceptTransfer(msg.transferId);
+        } else {
+          useTransferStore.getState().addPendingOffer({ transfer, fileOffer: offer });
+          console.log(`[TransferManager] Received file offer "${offer.name}" (${offer.size} bytes) from ${transfer.senderName}`);
+        }
         break;
       }
 
       case 'file-accept': {
-        const file = (this as any)[`file_${msg.transferId}`] as File;
+        const file = this.senderFiles.get(msg.transferId) || (this as any)[`file_${msg.transferId}`] as File;
         if (file) {
           console.log(`[TransferManager] Recipient accepted transfer ${msg.transferId}. Starting stream.`);
           this.startSendingChunks(peerId, msg.transferId, file, 0);
+        } else {
+          console.warn(`[TransferManager] Cannot start stream for ${msg.transferId}: local file not found`);
         }
+        break;
+      }
+
+      case 'file-resume-check': {
+        const receiver = this.activeReceivers.get(msg.transferId);
+        const lastSeq = receiver ? receiver.lastSequence : -1;
+        const receivedBytes = receiver ? receiver.receivedBytes : 0;
+
+        console.log(`[TransferManager] Responding to resume check for ${msg.transferId} at chunk ${lastSeq}`);
+        this.sendControlMessage(peerId, {
+          type: 'file-resume',
+          transferId: msg.transferId,
+          timestamp: Date.now(),
+          payload: {
+            transferId: msg.transferId,
+            lastReceivedChunk: lastSeq,
+            lastReceivedOffset: receivedBytes,
+            newReceiverId: selfDevice?.id,
+            newReceiverName: selfDevice?.name
+          }
+        });
         break;
       }
 
       case 'file-resume': {
         const resumePayload = msg.payload as FileResumePayload;
-        const file = (this as any)[`file_${msg.transferId}`] as File;
+        const file = this.senderFiles.get(msg.transferId) || (this as any)[`file_${msg.transferId}`] as File;
         if (file) {
           const nextSeq = (resumePayload.lastReceivedChunk ?? -1) + 1;
           const targetPeerId = resumePayload.newReceiverId || peerId;
@@ -656,6 +722,8 @@ export class TransferManager {
           });
 
           this.startSendingChunks(targetPeerId, msg.transferId, file, nextSeq);
+        } else {
+          console.warn(`[TransferManager] Cannot resume ${msg.transferId}: local file handle not in memory`);
         }
         break;
       }
@@ -853,6 +921,7 @@ export class TransferManager {
 
   /**
    * Checks IndexedDB for any in-flight interrupted transfers and attempts auto-resumption with peers.
+   * Only restores sessions that are genuinely incomplete and not currently active.
    */
   public async restoreInFlightTransfers(): Promise<void> {
     try {
@@ -862,15 +931,31 @@ export class TransferManager {
       const devices = useDeviceStore.getState().devices;
       const selfDevice = useDeviceStore.getState().selfDevice;
       const currentRoomId = useUIStore.getState().currentRoomId;
+      const activeTransfers = useTransferStore.getState().transfers;
 
       for (const session of sessions) {
         // Skip sessions that don't match current room
         if (session.roomId && currentRoomId && session.roomId !== currentRoomId) {
+          console.log(`[TransferManager] Skipping session ${session.transferId} — different room`);
+          continue;
+        }
+
+        // Skip sessions that are already active in the transfer store as completed / transferring
+        const existing = activeTransfers.get(session.transferId);
+        if (existing) {
+          if (existing.status === 'completed' || existing.status === 'transferring') {
+            // Already done or still going — don't interfere
+            continue;
+          }
+        }
+
+        // Skip if the sender is ourselves (we were the sender, not receiver)
+        if (session.senderId === selfDevice?.id) {
+          console.log(`[TransferManager] Skipping session ${session.transferId} — we are the sender, not receiver`);
           continue;
         }
 
         // Restore transfer record in UI store if not already present
-        const existing = useTransferStore.getState().transfers.get(session.transferId);
         if (!existing) {
           useTransferStore.getState().addTransfer({
             id: session.transferId,
@@ -938,6 +1023,8 @@ export class TransferManager {
               newReceiverName: selfDevice?.name
             }
           });
+        } else {
+          console.log(`[TransferManager] Sender "${session.senderName}" not yet in room for session ${session.transferId} — will retry on next peer join`);
         }
       }
     } catch (err) {

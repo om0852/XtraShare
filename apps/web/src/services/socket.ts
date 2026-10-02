@@ -142,10 +142,13 @@ class SocketService {
     return new Promise((resolve, reject) => {
       if (!this.socket) return reject(new Error('Socket not initialized'));
 
+      const normalizedId = roomId.toUpperCase().trim();
+      console.log(`%c[XtraShare] Joining room: ${normalizedId}`, 'color: #06b6d4; font-weight: bold');
+
       this.socket.emit(
         'room:join',
         {
-          roomId: roomId.toUpperCase().trim(),
+          roomId: normalizedId,
           device
         },
         (res) => {
@@ -154,12 +157,15 @@ class SocketService {
             useDeviceStore.getState().setDevices(res.devices);
             useUIStore.getState().setCurrentRoomId(res.roomId);
             localStorage.setItem('xtrashare_last_room', res.roomId);
+            console.log(`%c[XtraShare] Joined room: ${res.roomId} (${res.devices.length} peers)`, 'color: #10b981; font-weight: bold');
             for (const listener of this.roomJoinedListeners) {
               listener(res.roomId);
             }
             resolve(res.roomId);
           } else {
-            // If room doesn't exist, create a fresh one
+            // Room no longer exists on server (server restart / room expired) — create a new one
+            console.warn(`[XtraShare] Room "${normalizedId}" not found. Creating a new room...`);
+            localStorage.removeItem('xtrashare_last_room');
             this.createRoom(device).then(resolve).catch(reject);
           }
         }

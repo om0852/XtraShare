@@ -11,6 +11,9 @@ export class PeerConnectionManager {
 
   constructor() {
     socketService.onSignal((packet) => this.handleSignal(packet));
+    socketService.onPeerLeave((deviceId) => {
+      this.closeConnection(deviceId);
+    });
   }
 
   /**
@@ -18,7 +21,12 @@ export class PeerConnectionManager {
    */
   public ensureConnection(peerId: string): RTCPeerConnection {
     let pc = this.connections.get(peerId);
-    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+    if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc) {
+        try {
+          pc.close();
+        } catch {}
+      }
       pc = this.createPeerConnection(peerId);
       this.connections.set(peerId, pc);
 
@@ -27,6 +35,17 @@ export class PeerConnectionManager {
         ordered: true
       });
       this.setupDataChannel(peerId, channel);
+    } else {
+      // Re-create data channel if missing or closed on an active connection
+      const existingChannel = this.dataChannels.get(peerId);
+      if (!existingChannel || existingChannel.readyState === 'closed') {
+        try {
+          const channel = pc.createDataChannel('xtrashare-data', { ordered: true });
+          this.setupDataChannel(peerId, channel);
+        } catch (e) {
+          console.warn('Could not re-create DataChannel on existing pc:', e);
+        }
+      }
     }
     return pc;
   }
