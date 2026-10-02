@@ -225,10 +225,23 @@ export const TransferModal: React.FC = () => {
                         <div className="flex items-center justify-between p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-300 text-[10px] font-mono gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping flex-shrink-0" />
-                            <span className="font-bold truncate">Interrupted · Resuming...</span>
+                            <span className="font-bold truncate">Interrupted · {isSender ? 'Awaiting receiver...' : 'Resuming...'}</span>
                           </div>
                           <button
-                            onClick={() => transferManager.restoreInFlightTransfers()}
+                            onClick={() => {
+                              if (isSender) {
+                                // Sender: ask receiver where they left off, then resume from there
+                                transferManager.sendControlMessage(t.receiverId, {
+                                  type: 'file-resume-check',
+                                  transferId: t.id,
+                                  timestamp: Date.now(),
+                                  payload: {}
+                                });
+                              } else {
+                                // Receiver: restore in-flight from IndexedDB and reconnect
+                                transferManager.restoreInFlightTransfers();
+                              }
+                            }}
                             className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-black text-[9px] font-extrabold transition-all flex-shrink-0"
                           >
                             <RefreshCw className="w-2.5 h-2.5" />
