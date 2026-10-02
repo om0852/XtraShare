@@ -409,7 +409,7 @@ export class TransferManager {
       }
 
       // Backpressure regulation: wait for drain with safety timeout
-      if (channel.bufferedAmount > HIGH_WATER_MARK) {
+      if (channel.bufferedAmount >= HIGH_WATER_MARK) {
         await this.waitForDrain(channel);
         if (senderControl.abort || channel.readyState !== 'open') {
           useTransferStore.getState().updateTransfer(transferId, {
@@ -437,19 +437,36 @@ export class TransferManager {
 
       // Construct binary frame: 32 bytes header + raw chunk payload
       const frame = this.buildBinaryFrame(transferId, seq, totalChunks, buffer);
-      try {
-        channel.send(frame);
-      } catch (err) {
-        // Mark interrupted — do NOT recursively call relay here as it creates a thrashing loop
-        // (relay→WebRTC→relay→WebRTC). Let the user retry or auto-resume handle it.
-        console.warn(`[TransferManager] WebRTC channel send failed at chunk ${seq}. Marking interrupted.`, err);
-        this.activeSenders.delete(transferId);
-        useTransferStore.getState().updateTransfer(transferId, {
-          status: 'interrupted',
-          lastSequence: seq,
-          bytesTransferred: bytesSent,
-          error: 'WebRTC channel dropped. Click Retry or wait for auto-resume.'
-        });
+
+      // Robust send with retry on backpressure / transient buffer exception
+      let sent = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          channel.send(frame);
+          sent = true;
+          break;
+        } catch (err) {
+          console.warn(`[TransferManager] WebRTC send buffer full at chunk ${seq} (attempt ${attempt + 1}/3). Waiting for drain...`);
+          await this.waitForDrain(channel);
+          await new Promise((r) => setTimeout(r, 80));
+        }
+      }
+
+      if (!sent) {
+        if (channel.readyState !== 'open') {
+          console.warn(`[TransferManager] WebRTC channel closed at chunk ${seq}. Marking interrupted.`);
+          this.activeSenders.delete(transferId);
+          useTransferStore.getState().updateTransfer(transferId, {
+            status: 'interrupted',
+            lastSequence: seq,
+            bytesTransferred: bytesSent,
+            error: 'WebRTC connection dropped. Click Retry or wait for auto-resume.'
+          });
+          return;
+        }
+        // Fallback to relay streamer for remaining chunks
+        console.warn(`[TransferManager] WebRTC send failed after retries at chunk ${seq}. Falling back to relay streamer.`);
+        await this.startSendingChunksViaRelay(targetPeerId, transferId, file, seq);
         return;
       }
 
@@ -602,12 +619,14 @@ export class TransferManager {
 
   private waitForDrain(channel: RTCDataChannel): Promise<void> {
     return new Promise((resolve) => {
-      if (channel.readyState !== 'open') return resolve();
+      if (channel.readyState !== 'open' || channel.bufferedAmount <= (channel.bufferedAmountLowThreshold || LOW_WATER_MARK)) {
+        return resolve();
+      }
 
       const timeout = setTimeout(() => {
         channel.removeEventListener('bufferedamountlow', onLow);
         resolve();
-      }, 1500);
+      }, 2000);
 
       const onLow = () => {
         clearTimeout(timeout);
