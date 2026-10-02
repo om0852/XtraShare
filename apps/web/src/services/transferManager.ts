@@ -285,10 +285,15 @@ export class TransferManager {
         return resolve(channel);
       }
 
-      // Kick off WebRTC negotiation proactively
-      try {
-        peerConnectionManager.ensureConnection(peerId);
-      } catch {}
+      // Only kick off WebRTC negotiation if no connection exists yet
+      // DO NOT call ensureConnection if connection is already in progress —
+      // that would trigger a new offer/answer cycle and destabilize the existing channel
+      const existingPc = peerConnectionManager.getConnection(peerId);
+      if (!existingPc || existingPc.connectionState === 'closed' || existingPc.connectionState === 'failed') {
+        try {
+          peerConnectionManager.ensureConnection(peerId);
+        } catch {}
+      }
 
       const timer = setTimeout(() => {
         clearInterval(checkInterval);
@@ -427,8 +432,16 @@ export class TransferManager {
       try {
         channel.send(frame);
       } catch (err) {
-        console.warn(`[TransferManager] Channel send failed, attempting relay fallback from seq ${seq}:`, err);
-        await this.startSendingChunksViaRelay(targetPeerId, transferId, file, seq);
+        // Mark interrupted — do NOT recursively call relay here as it creates a thrashing loop
+        // (relay→WebRTC→relay→WebRTC). Let the user retry or auto-resume handle it.
+        console.warn(`[TransferManager] WebRTC channel send failed at chunk ${seq}. Marking interrupted.`, err);
+        this.activeSenders.delete(transferId);
+        useTransferStore.getState().updateTransfer(transferId, {
+          status: 'interrupted',
+          lastSequence: seq,
+          bytesTransferred: bytesSent,
+          error: 'WebRTC channel dropped. Click Retry or wait for auto-resume.'
+        });
         return;
       }
 
@@ -511,17 +524,10 @@ export class TransferManager {
         return;
       }
 
-      // While relay is running, keep checking if WebRTC has opened — switch if ready
-      if (seq > 0 && seq % 50 === 0) {
-        const ch = peerConnectionManager.getDataChannel(targetPeerId);
-        if (ch && ch.readyState === 'open') {
-          console.log(`%c[TransferManager] WebRTC DataChannel opened during relay! Switching transport at chunk ${seq}`, 'color: #10b981; font-weight: bold');
-          senderControl.abort = true;
-          // Hand off to WebRTC sender from current seq
-          await this.startSendingChunks(targetPeerId, transferId, file, seq);
-          return;
-        }
-      }
+      // NOTE: We intentionally do NOT switch from relay to WebRTC mid-transfer.
+      // Switching mid-transfer caused a thrashing loop:
+      //   relay → WebRTC → channel drop → relay → WebRTC → ...
+      // Transport is locked at transfer start. If WebRTC is desired, retry the transfer.
 
       const start = seq * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
