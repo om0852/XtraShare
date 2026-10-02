@@ -28,6 +28,9 @@ interface ActiveReceiverSession {
   startTime: number;
   lastProgressUpdate: number;
   lastBytes: number;
+  fileCompleteReceived?: boolean;
+  forceFinalize?: boolean;
+  completionTimer?: any;
 }
 
 export class TransferManager {
@@ -846,7 +849,26 @@ export class TransferManager {
       }
 
       case 'file-complete': {
-        this.finalizeReceivedFile(msg.transferId);
+        const receiver = this.activeReceivers.get(msg.transferId);
+        if (receiver) {
+          receiver.fileCompleteReceived = true;
+          if (receiver.receivedCount >= receiver.totalChunks) {
+            this.finalizeReceivedFile(msg.transferId);
+          } else {
+            console.log(
+              `[TransferManager] file-complete message arrived early (${receiver.receivedCount}/${receiver.totalChunks} chunks). Awaiting remaining DataChannel chunks...`
+            );
+            if (!receiver.completionTimer) {
+              receiver.completionTimer = setTimeout(() => {
+                console.warn(
+                  `[TransferManager] Completion timer expired for ${msg.transferId} (${receiver.receivedCount}/${receiver.totalChunks} chunks). Force finalizing...`
+                );
+                receiver.forceFinalize = true;
+                this.finalizeReceivedFile(msg.transferId);
+              }, 10000);
+            }
+          }
+        }
         break;
       }
 
@@ -1172,10 +1194,19 @@ export class TransferManager {
     const receiver = this.activeReceivers.get(transferId);
     if (!receiver) return;
 
+    // Guard: Do not finalize early unless all chunks are received or forced by timeout
+    if (receiver.receivedCount < receiver.totalChunks && !receiver.forceFinalize) {
+      return;
+    }
+
+    if (receiver.completionTimer) {
+      clearTimeout(receiver.completionTimer);
+    }
+
     this.activeReceivers.delete(transferId);
     console.log(`[TransferManager] Finalizing received file "${receiver.offer.name}" (${receiver.receivedBytes} bytes)`);
 
-    // Verify all chunks are assembled, loading any missing chunks from IndexedDB
+    // Verify all chunks are assembled, loading any missing chunks from persistent storage
     let allChunks = receiver.chunks;
     if (allChunks.some((c) => !c)) {
       console.log(`[TransferManager] Loading chunks from persistent storage for assembly...`);
