@@ -83,6 +83,26 @@ Hugging Face provides 100% free CPU containers (2 vCPU, 16GB RAM) that can run a
 
 ---
 
+## 🐙 Option 5: Automated GitHub Actions CI/CD & GitHub Container Registry (GHCR)
+
+XtraShare includes an automated `.github/workflows/ci-cd.yml` workflow:
+
+### What it does automatically on every `git push`:
+1. **Automated CI:** Runs the entire test suite and compiles all monorepo workspaces.
+2. **Multi-Architecture Docker Build:** Builds `linux/amd64` (standard cloud/PC) and `linux/arm64` (Raspberry Pi / Apple Silicon).
+3. **Automated Publishing:** Publishes the container image to GitHub Container Registry (`ghcr.io`).
+
+### Run the published image anywhere:
+```bash
+docker run -d \
+  --name xtrashare \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  ghcr.io/<your-github-username>/xtrashare:latest
+```
+
+---
+
 ## 🐳 Option 5: Self-Hosting with Docker & Docker Compose
 
 For private home lab, NAS, or Raspberry Pi self-hosting:
