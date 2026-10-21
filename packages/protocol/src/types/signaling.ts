@@ -17,7 +17,7 @@ export interface RelayChunkPacket {
   transferId: string;
   sequence: number;
   totalChunks: number;
-  data: string | ArrayBuffer; // base64 or buffer
+  data: string | ArrayBuffer | ArrayBufferLike; // base64 or buffer
 }
 
 export interface ClientToServerEvents {

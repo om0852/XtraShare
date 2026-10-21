@@ -169,7 +169,7 @@ describe('Transfer Pipeline & High-Volume Speed Benchmark Tests', () => {
         transferId,
         sequence: seq,
         totalChunks: TOTAL_CHUNKS,
-        data: chunkBuffers[seq]!.buffer
+        data: chunkBuffers[seq]!.buffer as ArrayBuffer
       });
     }
 

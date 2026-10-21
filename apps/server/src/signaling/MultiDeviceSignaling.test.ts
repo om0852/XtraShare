@@ -188,7 +188,7 @@ describe('Multi-Device Connected Signaling & Routing Tests', () => {
   });
 
   it('should route binary relay chunks isolated to the target peer', async () => {
-    const rawChunkData = new Uint8Array([10, 20, 30, 40, 50, 60]).buffer;
+    const rawChunkData = new Uint8Array([10, 20, 30, 40, 50, 60]).buffer as ArrayBuffer;
     const relayPacket: RelayChunkPacket = {
       from: '',
       to: deviceIdB,
