@@ -170,7 +170,7 @@ export const DropZone: React.FC = () => {
 
           {/* Files Tags List */}
           <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-            {selectedFiles.map((file, i) => (
+            {selectedFiles.slice(0, 15).map((file, i) => (
               <div
                 key={i}
                 className="flex items-center justify-between p-3 rounded-2xl bg-zinc-900/80 border border-white/10 text-xs"
@@ -191,6 +191,12 @@ export const DropZone: React.FC = () => {
                 </button>
               </div>
             ))}
+
+            {selectedFiles.length > 15 && (
+              <div className="p-2.5 rounded-xl bg-zinc-900/60 border border-white/10 text-center text-[11px] font-mono text-zinc-400">
+                + {selectedFiles.length - 15} more files selected
+              </div>
+            )}
           </div>
 
           {/* Target Device Selector & Send Button */}

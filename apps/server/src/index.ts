@@ -80,7 +80,16 @@ async function bootstrap() {
       methods: ['GET', 'POST']
     },
     transports: ['websocket', 'polling'],
-    maxHttpBufferSize: 2e7 // 20MB — handles 256KB chunks with room for framing overhead
+    maxHttpBufferSize: 2e7, // 20MB — handles 256KB chunks with room for framing overhead
+    // Large relay-mode transfers can briefly saturate the main thread on
+    // slower (mobile) devices while processing/persisting chunks, which can
+    // delay the client's pong response to a heartbeat ping. The Socket.IO
+    // defaults (pingInterval 25s / pingTimeout 20s) are too tight for that
+    // and cause spurious "ping timeout" disconnects right as a transfer is
+    // finishing — exactly when the client is busiest assembling the file.
+    // Give much more slack here; this has no downside for a LAN/relay app.
+    pingInterval: 25000,
+    pingTimeout: 60000
   });
 
   // Attach Signaling Service

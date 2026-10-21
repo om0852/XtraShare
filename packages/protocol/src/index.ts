@@ -6,3 +6,4 @@ export * from './types/clipboard.js';
 export * from './types/errors.js';
 export * from './constants.js';
 export * from './utils/sanitize.js';
+export * from './utils/frame.js';

@@ -33,6 +33,7 @@ export interface Transfer {
   fileSize?: number;
   mimeType?: string;
   totalChunks?: number;
+  chunkSize?: number; // the actual per-transfer chunk size negotiated at offer time (see determineChunkSizeForTransfer)
 
   bytesTransferred: number;
   speed?: number; // bytes per second
@@ -44,6 +45,7 @@ export interface Transfer {
   lastSequence?: number;
   error?: string;
   checksum?: string;
+  downloadUrl?: string;
 
   textContent?: string;
 }

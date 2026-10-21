@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { X, Copy, Check, Smartphone, ArrowRight, Camera } from 'lucide-react';
+import { X, Copy, Check, Smartphone, ArrowRight, Camera, Globe } from 'lucide-react';
 import { useUIStore } from '../store/uiStore.js';
 import { socketService } from '../services/socket.js';
 
@@ -9,13 +9,29 @@ export const QRCodeModal: React.FC = () => {
   const [manualCode, setManualCode] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [lanHost, setLanHost] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isQrModalOpen) return;
+    // Query backend to obtain LAN IP so phones scanning the QR can reach this host
+    fetch('/api/config')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.lanIp && data.lanIp !== '127.0.0.1') {
+          const currentPort = window.location.port ? `:${window.location.port}` : '';
+          setLanHost(`${data.lanIp}${currentPort}`);
+        }
+      })
+      .catch(() => {});
+  }, [isQrModalOpen]);
 
   if (!isQrModalOpen) return null;
 
-  // Construct complete pairing URL
-  const currentHost = window.location.host;
+  // Construct complete pairing URL: prefer LAN IP so mobile phones scanning can reach this host
+  const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const effectiveHost = isLocalHost && lanHost ? lanHost : window.location.host;
   const protocol = window.location.protocol;
-  const pairUrl = `${protocol}//${currentHost}/?room=${currentRoomId}`;
+  const pairUrl = `${protocol}//${effectiveHost}/?room=${currentRoomId}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(pairUrl);
@@ -96,6 +112,12 @@ export const QRCodeModal: React.FC = () => {
               {currentRoomId}
             </span>
           </div>
+          {isLocalHost && lanHost && (
+            <div className="mt-1 flex items-center space-x-1 text-[11px] text-zinc-500 font-mono">
+              <Globe className="w-3 h-3 text-emerald-600" />
+              <span>LAN: {lanHost}</span>
+            </div>
+          )}
         </div>
 
         {/* Copy Link Row */}

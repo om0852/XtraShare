@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react';
-import { ArrowUpRight, ArrowDownLeft, CheckCircle2, XCircle, Clock, Trash2 } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, CheckCircle2, XCircle, Clock, Trash2, Download } from 'lucide-react';
 import { formatBytes } from '@xtrashare/protocol';
 import { useTransferStore } from '../store/transferStore.js';
 import { useDeviceStore } from '../store/deviceStore.js';
 
 export const TransferHistory: React.FC = () => {
   const history = useTransferStore((state) => state.history);
+  const transfers = useTransferStore((state) => state.transfers);
   const loadHistory = useTransferStore((state) => state.loadHistory);
   const clearHistory = useTransferStore((state) => state.clearHistory);
   const selfDevice = useDeviceStore((state) => state.selfDevice);
@@ -76,6 +77,9 @@ export const TransferHistory: React.FC = () => {
           <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
             {history.map((t) => {
               const isSender = t.senderId === selfDevice?.id;
+              const liveTransfer = transfers.get(t.id);
+              const downloadUrl = liveTransfer?.downloadUrl || t.downloadUrl;
+              const canDownload = !isSender && t.status === 'completed' && Boolean(downloadUrl);
 
               return (
                 <div
@@ -101,7 +105,20 @@ export const TransferHistory: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex-shrink-0 ml-3">{getStatusBadge(t.status)}</div>
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                    {canDownload && (
+                      <a
+                        href={downloadUrl}
+                        download={t.fileName || 'download'}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-bold shadow-md shadow-white/10 transition-all active:scale-95"
+                        title="Save File"
+                      >
+                        <Download className="w-3.5 h-3.5 text-black" />
+                        <span>Save</span>
+                      </a>
+                    )}
+                    {getStatusBadge(t.status)}
+                  </div>
                 </div>
               );
             })}

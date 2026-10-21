@@ -169,16 +169,35 @@ export const AirDropRadar: React.FC<AirDropRadarProps> = ({ onSelectDeviceForTra
           ) : (
             <div className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-white text-black text-[10px] sm:text-[11px] font-mono font-black shadow-[0_0_20px_rgba(255,255,255,0.3)]">
               <Activity className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
-              <span>{isSendingActive ? `SENDING ${transferProgress}%` : `RECEIVING ${transferProgress}%`}</span>
-              {activeTransfer?.transportMode === 'lan-p2p' ? (
-                <span className="font-mono text-[8px] sm:text-[9px] bg-black text-emerald-400 border border-emerald-400/40 px-1 py-0.2 rounded font-bold">
-                  LAN
+              {activeTransfer?.transportMode === 'lan-p2p' && (
+                <span className="inline-flex items-center gap-1 font-mono text-[8px] sm:text-[9px] bg-black text-emerald-400 border border-emerald-400/40 px-2 py-0.5 rounded-full font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+                  <span>DIRECT LAN (0 MB DATA)</span>
                 </span>
-              ) : activeTransfer?.speed ? (
+              )}
+              {activeTransfer?.transportMode === 'webrtc-p2p' && (
+                <span className="inline-flex items-center gap-1 font-mono text-[8px] sm:text-[9px] bg-black text-sky-400 border border-sky-400/40 px-2 py-0.5 rounded-full font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8]" />
+                  <span>INTERNET P2P</span>
+                </span>
+              )}
+              {(activeTransfer?.transportMode === 'websocket-relay' || activeTransfer?.transportMode === 'turn-relay') && (
+                <span className="inline-flex items-center gap-1 font-mono text-[8px] sm:text-[9px] bg-black text-amber-400 border border-amber-400/40 px-2 py-0.5 rounded-full font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]" />
+                  <span>USING INTERNET DATA</span>
+                </span>
+              )}
+              {!activeTransfer?.transportMode && (
+                <span className="inline-flex items-center gap-1 font-mono text-[8px] sm:text-[9px] bg-black text-zinc-300 border border-white/20 px-2 py-0.5 rounded-full font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse" />
+                  <span>CONNECTING...</span>
+                </span>
+              )}
+              {Boolean(activeTransfer?.speed) && (
                 <span className="font-mono text-[9px] sm:text-[10px] bg-black text-white px-1 sm:px-1.5 py-0.2 rounded font-bold">
-                  {formatBytes(activeTransfer.speed)}/s
+                  {formatBytes(activeTransfer!.speed!)}/s
                 </span>
-              ) : null}
+              )}
             </div>
           )}
         </div>

@@ -20,6 +20,14 @@ class SocketService {
   private peerJoinListeners = new Set<(device: DeviceInfo) => void>();
   private peerLeaveListeners = new Set<(deviceId: string) => void>();
   private roomJoinedListeners = new Set<(roomId: string) => void>();
+  // The room this tab is actually, currently in for THIS session — the
+  // source of truth on an automatic Socket.IO reconnect (e.g. after a
+  // transient "ping timeout" drop mid-transfer). localStorage's last-room
+  // value can be stale (left over from an earlier, unrelated session) and
+  // blindly re-deriving from it on every reconnect risks rejoining — or
+  // worse, creating — the WRONG room while peers and in-flight transfers
+  // are still waiting in the room this tab was actually just in.
+  private activeSessionRoomId: string | null = null;
 
   public connect(): void {
     if (this.socket) return;
@@ -34,7 +42,22 @@ class SocketService {
     this.socket.on('connect', () => {
       console.log('%c[XtraShare] Connected to signaling server%c ID: ' + this.socket?.id, 'color: #10b981; font-weight: bold', 'color: #94a3b8');
       useUIStore.getState().setConnectionStatus('connected');
-      this.autoJoinOrInit();
+
+      if (this.activeSessionRoomId) {
+        // Reconnect within an already-active session: rejoin the exact room
+        // we were in, not whatever localStorage/URL happens to say. Only
+        // fall back to the normal init flow if the room is genuinely gone.
+        console.log(`%c[XtraShare] Reconnected — rejoining active session room ${this.activeSessionRoomId}`, 'color: #06b6d4; font-weight: bold');
+        this.joinRoom(this.activeSessionRoomId).catch((err) => {
+          console.warn(
+            `[XtraShare] Could not rejoin room ${this.activeSessionRoomId} after reconnect (likely expired on the server) — starting a new session:`,
+            err?.message
+          );
+          this.autoJoinOrInit();
+        });
+      } else {
+        this.autoJoinOrInit();
+      }
     });
 
     this.socket.on('disconnect', () => {
@@ -127,6 +150,7 @@ class SocketService {
           useDeviceStore.getState().setDevices(res.devices);
           useUIStore.getState().setCurrentRoomId(res.roomId);
           localStorage.setItem('xtrashare_last_room', res.roomId);
+          this.activeSessionRoomId = res.roomId;
           for (const listener of this.roomJoinedListeners) {
             listener(res.roomId);
           }
@@ -157,6 +181,7 @@ class SocketService {
             useDeviceStore.getState().setDevices(res.devices);
             useUIStore.getState().setCurrentRoomId(res.roomId);
             localStorage.setItem('xtrashare_last_room', res.roomId);
+            this.activeSessionRoomId = res.roomId;
             console.log(`%c[XtraShare] Joined room: ${res.roomId} (${res.devices.length} peers)`, 'color: #10b981; font-weight: bold');
             for (const listener of this.roomJoinedListeners) {
               listener(res.roomId);

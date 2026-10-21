@@ -124,3 +124,68 @@ npm run build
 npm start
 ```
 The server will print local and LAN IP addresses alongside a terminal QR code ready for instant mobile scanning!
+
+---
+
+## ⚠️ Public / Cloud Deployment: You Need a TURN Server
+
+XtraShare's WebRTC layer ships with **STUN-only** ICE servers by default
+(`packages/protocol/src/constants.ts`). STUN is enough to discover your own
+public IP/port, but it **cannot relay traffic** when two peers sit behind
+different, restrictive/symmetric NATs — which is the normal case once your
+two devices aren't on the same LAN (e.g. one is on home WiFi, the other on
+mobile data, talking through your Render/Railway/Fly deployment).
+
+Without TURN, that direct P2P negotiation simply times out, and the app
+silently falls back to streaming the actual file bytes through the
+signaling server's WebSocket relay (`startSendingChunksViaRelay`). That is
+why a cloud deployment can look like it's "sending over the internet /
+through the server" and feels slow and bandwidth-capped — it genuinely is
+going through the server, consuming *your* server's bandwidth and CPU,
+instead of a direct peer-to-peer stream. On a LAN, the same code gets a
+fast `host` ICE candidate and never hits this path, which is why it "works
+fine locally".
+
+### Fix: add a TURN server
+
+1. Get TURN credentials — free/cheap options:
+   - [Metered.ca](https://www.metered.ca/tools/openrelay/) (free tier, quick signup)
+   - [Twilio Network Traversal Service](https://www.twilio.com/docs/stun-turn)
+   - Self-hosted [coturn](https://github.com/coturn/coturn) on a small VPS
+2. Set these build-time env vars for the `apps/web` Vite build (e.g. in
+   Render/Railway/Fly's dashboard, or a `.env` file read by Vite):
+   ```
+   VITE_TURN_URL=turn:your-turn-host:3478
+   VITE_TURN_USERNAME=your-username
+   VITE_TURN_CREDENTIAL=your-credential
+   ```
+   (`VITE_TURN_URL` accepts a comma-separated list, e.g. a `turn:` + `turns:` pair.)
+3. Rebuild/redeploy. The web client (`apps/web/src/services/webrtc.ts`) will
+   automatically add this TURN server to its ICE configuration. Real P2P (or
+   TURN-relayed, which is still far better than the app-level WebSocket
+   relay — it's a dedicated media-relay protocol, not JSON/base64 chunk
+   messages bouncing through your Node process) will then work across the
+   public internet.
+
+If you never configure a TURN server, XtraShare will log a console warning
+on non-LAN hostnames and keep working — just via the slower WebSocket relay
+fallback — so it degrades gracefully but is **not a substitute for TURN**
+if you expect good throughput between devices on different networks.
+
+---
+
+## Large-file downloads require HTTPS (a secure context)
+
+Receiving very large files (multi-GB) streams the assembled file straight
+to disk via a dedicated Service Worker (`apps/web/public/sw-download.js`,
+`apps/web/src/services/streamDownload.ts`) instead of holding the whole
+file in page memory — this is what prevents mobile Chrome from crashing
+("Aw, Snap!") right at 100% on big transfers. Service Workers only run in a
+**secure context**: HTTPS, or `http://localhost`. XtraShare's server has
+`ENABLE_HTTPS=true` by default for exactly this reason (it also self-signs
+a certificate — accept the browser's certificate warning once per device).
+If you deploy behind a reverse proxy, make sure it terminates/forwards
+HTTPS and that devices load the app over `https://`, not plain `http://`
+by LAN IP — otherwise the app silently falls back to the older in-memory
+Blob download, which can still run out of memory on very large files on
+constrained (mobile) devices.

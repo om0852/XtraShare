@@ -12,7 +12,12 @@ import {
   Cloud,
   Server,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download,
+  CheckCircle2,
+  Share2,
+  Globe,
+  AlertTriangle
 } from 'lucide-react';
 import { formatBytes } from '@xtrashare/protocol';
 import { useTransferStore } from '../store/transferStore.js';
@@ -24,49 +29,111 @@ export const TransferModal: React.FC = () => {
   const transfers = useTransferStore((state) => state.transfers);
   const selfDevice = useDeviceStore((state) => state.selfDevice);
   const [collapsed, setCollapsed] = useState(false);
+  const [showAllCards, setShowAllCards] = useState(false);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
-  // Active ongoing transfers
+  // Active ongoing and recently completed transfers
   const activeTransfers = Array.from(transfers.values()).filter(
     (t) =>
-      t.status === 'transferring' ||
-      t.status === 'offered' ||
-      t.status === 'accepted' ||
-      t.status === 'interrupted'
+      !dismissedIds.has(t.id) &&
+      (t.status === 'transferring' ||
+        t.status === 'offered' ||
+        t.status === 'accepted' ||
+        t.status === 'interrupted' ||
+        t.status === 'completed')
   );
+
+  const totalBatchFiles = activeTransfers.length;
+  const completedTransfers = activeTransfers.filter((t) => t.status === 'completed');
+  const transferringTransfers = activeTransfers.filter((t) => t.status === 'transferring');
+  const queuedTransfers = activeTransfers.filter((t) => t.status === 'accepted' || t.status === 'offered');
+  const totalBatchBytes = activeTransfers.reduce((acc, t) => acc + (t.fileSize || 0), 0);
+  const transferredBatchBytes = activeTransfers.reduce((acc, t) => acc + (t.bytesTransferred || 0), 0);
+  const overallProgress =
+    totalBatchBytes > 0
+      ? Math.min(100, Math.round((transferredBatchBytes / totalBatchBytes) * 100))
+      : completedTransfers.length === totalBatchFiles && totalBatchFiles > 0
+      ? 100
+      : 0;
+  const activeBatchSpeed = transferringTransfers.reduce((acc, t) => acc + (t.speed || 0), 0);
+
+  const displayedTransfers =
+    showAllCards || activeTransfers.length <= 4
+      ? activeTransfers
+      : [
+          ...activeTransfers.filter((t) => t.status === 'transferring' || t.status === 'interrupted'),
+          ...activeTransfers.filter((t) => t.status !== 'transferring' && t.status !== 'interrupted')
+        ].slice(0, 4);
+
+  const dismissAllCompleted = () => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      completedTransfers.forEach((t) => next.add(t.id));
+      return next;
+    });
+  };
 
   const hasOffers = pendingOffers.length > 0;
   const isMultiple = pendingOffers.length > 1;
-  const totalBatchBytes = pendingOffers.reduce((acc, o) => acc + o.fileOffer.size, 0);
+  const totalPendingBytes = pendingOffers.reduce((acc, o) => acc + o.fileOffer.size, 0);
   const firstSender = pendingOffers[0]?.transfer.senderName || 'Peer';
+  const displayedPendingOffers = pendingOffers.slice(0, 10);
+  const remainingPendingCount = pendingOffers.length - displayedPendingOffers.length;
 
   const renderTransportBadge = (mode?: string) => {
     switch (mode) {
       case 'lan-p2p':
         return (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 text-[9px] font-mono font-bold whitespace-nowrap">
+          <span
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold whitespace-nowrap shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+            title="Direct Local Wi-Fi transfer. Uses 0 MB Internet Data."
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
             <Wifi className="w-2.5 h-2.5" />
-            <span>LAN P2P</span>
+            <span>Direct LAN (0 MB Data)</span>
           </span>
         );
       case 'webrtc-p2p':
         return (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 text-[9px] font-mono font-bold whitespace-nowrap">
-            <Wifi className="w-2.5 h-2.5" />
-            <span>WebRTC P2P</span>
+          <span
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/30 text-[9px] font-mono font-bold whitespace-nowrap shadow-[0_0_10px_rgba(14,165,233,0.15)]"
+            title="Direct peer-to-peer connection across public internet."
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shadow-[0_0_6px_#38bdf8]" />
+            <Globe className="w-2.5 h-2.5" />
+            <span>Internet P2P (Using Data)</span>
           </span>
         );
       case 'turn-relay':
         return (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 text-[9px] font-mono font-bold whitespace-nowrap">
+          <span
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[9px] font-mono font-bold whitespace-nowrap shadow-[0_0_10px_rgba(245,158,11,0.2)]"
+            title="Relayed via TURN server over internet."
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_6px_#fbbf24]" />
             <Cloud className="w-2.5 h-2.5" />
-            <span>TURN Relay</span>
+            <span>TURN Relay (Using Data)</span>
+          </span>
+        );
+      case 'websocket-relay':
+        return (
+          <span
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/35 text-[9px] font-mono font-bold whitespace-nowrap shadow-[0_0_10px_rgba(245,158,11,0.25)]"
+            title="Direct P2P blocked by hotspot/firewall. Transferring through cloud server over internet."
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]" />
+            <Server className="w-2.5 h-2.5" />
+            <span>Cloud Relay (Using Mobile Data)</span>
           </span>
         );
       default:
         return (
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/25 text-[9px] font-mono font-bold whitespace-nowrap">
-            <Server className="w-2.5 h-2.5" />
-            <span>Relay</span>
+          <span
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-white/10 text-[9px] font-mono font-bold whitespace-nowrap"
+            title="Detecting transfer route..."
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse" />
+            <span>Detecting Route...</span>
           </span>
         );
     }
@@ -93,14 +160,14 @@ export const TransferModal: React.FC = () => {
                 </h3>
                 <p className="text-xs text-zinc-400 truncate">
                   From: <span className="text-white font-semibold">{firstSender}</span>
-                  {isMultiple && ` • Total: ${formatBytes(totalBatchBytes)}`}
+                  {isMultiple && ` • Total: ${formatBytes(totalPendingBytes)}`}
                 </p>
               </div>
             </div>
 
             {/* File(s) List */}
             <div className="max-h-48 sm:max-h-60 overflow-y-auto space-y-2 p-1">
-              {pendingOffers.map(({ transfer, fileOffer }) => (
+              {displayedPendingOffers.map(({ transfer, fileOffer }) => (
                 <div
                   key={transfer.id}
                   className="flex items-center justify-between p-3 rounded-xl bg-zinc-900/90 border border-white/10 text-xs gap-2"
@@ -131,6 +198,12 @@ export const TransferModal: React.FC = () => {
                   )}
                 </div>
               ))}
+
+              {remainingPendingCount > 0 && (
+                <div className="p-2.5 rounded-xl bg-zinc-900/60 border border-white/10 text-center text-[11px] font-mono text-zinc-400">
+                  + {remainingPendingCount} more files ({formatBytes(pendingOffers.slice(10).reduce((acc, o) => acc + o.fileOffer.size, 0))})
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -162,19 +235,79 @@ export const TransferModal: React.FC = () => {
           >
             <span className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-              <span>{activeTransfers.length} Active Transfer{activeTransfers.length > 1 ? 's' : ''}</span>
+              <span>{activeTransfers.length} Transfer{activeTransfers.length > 1 ? 's' : ''}</span>
             </span>
             {collapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
 
           {!collapsed && (
             <div className="max-h-[55vh] sm:max-h-[70vh] overflow-y-auto space-y-2 p-2 sm:p-0 sm:space-y-3 bg-zinc-950/95 sm:bg-transparent border-t border-white/10 sm:border-none">
-              {activeTransfers.map((t) => {
+              {/* Batch Transfer Summary Card (when > 3 transfers) */}
+              {activeTransfers.length > 3 && (
+                <div className="p-3.5 sm:p-4 rounded-xl sm:rounded-2xl mono-panel border border-white/25 shadow-2xl space-y-2.5 bg-zinc-950/95 animate-slide-up">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Files className="w-4 h-4 text-white" />
+                      <span className="text-xs font-extrabold text-white">
+                        Batch Progress ({completedTransfers.length}/{totalBatchFiles})
+                      </span>
+                    </div>
+                    {activeBatchSpeed > 0 && (
+                      <span className="flex items-center gap-1 font-mono text-[10px] text-emerald-400 font-bold">
+                        <Gauge className="w-3 h-3" />
+                        <span>{formatBytes(activeBatchSpeed)}/s</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Overall progress bar */}
+                  <div className="space-y-1">
+                    <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-white h-1.5 rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(255,255,255,0.4)]"
+                        style={{ width: `${overallProgress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
+                      <span>{formatBytes(transferredBatchBytes)} of {formatBytes(totalBatchBytes)}</span>
+                      <span className="text-white font-bold">{overallProgress}%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[10px]">
+                    <span className="text-zinc-400 font-mono">
+                      {transferringTransfers.length > 0 ? `${transferringTransfers.length} active` : 'Queue idle'}
+                      {queuedTransfers.length > 0 ? ` • ${queuedTransfers.length} queued` : ''}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {completedTransfers.length > 0 && (
+                        <button
+                          onClick={dismissAllCompleted}
+                          className="text-zinc-400 hover:text-white transition-colors underline decoration-white/30"
+                        >
+                          Clear done ({completedTransfers.length})
+                        </button>
+                      )}
+                      {activeTransfers.length > 4 && (
+                        <button
+                          onClick={() => setShowAllCards(!showAllCards)}
+                          className="text-white hover:underline font-semibold"
+                        >
+                          {showAllCards ? 'Compact' : `Show all (${activeTransfers.length})`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {displayedTransfers.map((t) => {
                 const isSender = t.senderId === selfDevice?.id;
+                const isCompleted = t.status === 'completed';
                 const progress =
                   t.fileSize && t.fileSize > 0
                     ? Math.min(100, Math.round((t.bytesTransferred / t.fileSize) * 100))
-                    : 0;
+                    : isCompleted ? 100 : 0;
 
                 const isPendingAccept = t.status === 'offered';
                 const isInterrupted = t.status === 'interrupted';
@@ -186,7 +319,9 @@ export const TransferModal: React.FC = () => {
                   >
                     {/* Row 1: filename + status badge + close */}
                     <div className="flex items-center gap-2">
-                      {isSender ? (
+                      {isCompleted ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                      ) : isSender ? (
                         <ArrowUpRight className="w-3.5 h-3.5 text-white flex-shrink-0" />
                       ) : (
                         <ArrowDownLeft className="w-3.5 h-3.5 text-white flex-shrink-0" />
@@ -194,13 +329,25 @@ export const TransferModal: React.FC = () => {
                       <span className="text-xs font-bold text-white truncate flex-1 min-w-0">
                         {t.fileName || 'Transfer'}
                       </span>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-white/10 text-white border border-white/20 font-bold whitespace-nowrap flex-shrink-0">
-                        {isSender ? 'UP' : 'DOWN'}
+                      <span
+                        className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap flex-shrink-0 ${
+                          isCompleted
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-white/10 text-white border border-white/20'
+                        }`}
+                      >
+                        {isCompleted ? (isSender ? 'SENT' : 'RECEIVED') : isSender ? 'UP' : 'DOWN'}
                       </span>
                       <button
-                        onClick={() => transferManager.cancelTransfer(t.id)}
+                        onClick={() => {
+                          if (isCompleted) {
+                            setDismissedIds((prev) => new Set(prev).add(t.id));
+                          } else {
+                            transferManager.cancelTransfer(t.id);
+                          }
+                        }}
                         className="p-0.5 rounded text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors flex-shrink-0"
-                        title="Cancel Transfer"
+                        title={isCompleted ? 'Dismiss' : 'Cancel Transfer'}
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -215,7 +362,56 @@ export const TransferModal: React.FC = () => {
                     </div>
 
                     {/* Row 3: Progress / Status */}
-                    {isPendingAccept ? (
+                    {isCompleted ? (
+                      <div className="space-y-2 pt-0.5">
+                        <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                            <span className="font-bold truncate text-[11px]">
+                              {isSender ? 'Transfer Completed' : 'Received Successfully!'}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px] text-emerald-400 font-semibold flex-shrink-0">
+                            {formatBytes(t.fileSize || t.bytesTransferred)}
+                          </span>
+                        </div>
+
+                        {!isSender && t.downloadUrl && (
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={t.downloadUrl}
+                              download={t.fileName || 'download'}
+                              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-white hover:bg-zinc-200 text-black text-xs font-black shadow-lg shadow-white/20 transition-all active:scale-95"
+                            >
+                              <Download className="w-4 h-4 text-black" />
+                              <span>Save File</span>
+                            </a>
+                            {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const resp = await fetch(t.downloadUrl!);
+                                    const blob = await resp.blob();
+                                    const file = new window.File([blob], t.fileName || 'file', { type: t.mimeType });
+                                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                      await navigator.share({ files: [file], title: t.fileName });
+                                    } else {
+                                      await navigator.share({ title: t.fileName, url: t.downloadUrl });
+                                    }
+                                  } catch (e) {
+                                    console.warn('Share not completed:', e);
+                                  }
+                                }}
+                                className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/15 transition-all flex-shrink-0 active:scale-95"
+                                title="Share or Open in App"
+                              >
+                                <Share2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : isPendingAccept ? (
                       <div className="flex items-center gap-2 text-[10px] text-zinc-400 font-mono">
                         <span className="animate-spin w-3 h-3 border border-white border-t-transparent rounded-full flex-shrink-0" />
                         <span>Awaiting confirmation...</span>
@@ -303,6 +499,21 @@ export const TransferModal: React.FC = () => {
                             {t.eta ? `~${t.eta}s` : '—'}
                           </span>
                         </div>
+
+                        {/* Network Internet Status Light Indicator */}
+                        {(t.transportMode === 'websocket-relay' || t.transportMode === 'turn-relay') && (
+                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[9px] font-mono">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0 shadow-[0_0_6px_#fbbf24]" />
+                            <AlertTriangle className="w-2.5 h-2.5 text-amber-400 flex-shrink-0" />
+                            <span className="truncate">Using Mobile / Internet Data (Cloud Relay)</span>
+                          </div>
+                        )}
+                        {t.transportMode === 'lan-p2p' && (
+                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[9px] font-mono">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0 shadow-[0_0_6px_#34d399]" />
+                            <span className="truncate">Direct Local Wi-Fi • 0 MB Internet Data</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

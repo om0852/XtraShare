@@ -1,39 +1,69 @@
 import { get, set, del } from 'idb-keyval';
-import { Transfer } from '@xtrashare/protocol';
+import { Transfer, MAX_RECENT_TRANSFERS } from '@xtrashare/protocol';
 
 const HISTORY_KEY = 'xtrashare_transfer_history';
 
 export class StorageService {
+  private static pendingSaves = new Map<string, Transfer>();
+  private static flushTimeout: any = null;
+
   /**
-   * Loads transfer history from IndexedDB.
+   * Loads transfer history from IndexedDB, merging in-flight pending saves.
    */
   public static async getHistory(): Promise<Transfer[]> {
     try {
-      const history = await get<Transfer[]>(HISTORY_KEY);
-      return history || [];
+      const history = (await get<Transfer[]>(HISTORY_KEY)) || [];
+      if (this.pendingSaves.size === 0) {
+        return history;
+      }
+      const map = new Map(history.map((t) => [t.id, t]));
+      for (const t of this.pendingSaves.values()) {
+        map.set(t.id, t);
+      }
+      return Array.from(map.values()).slice(0, MAX_RECENT_TRANSFERS);
     } catch (err) {
       console.warn('Failed to load history from IndexedDB:', err);
-      return [];
+      return Array.from(this.pendingSaves.values()).slice(0, MAX_RECENT_TRANSFERS);
     }
   }
 
   /**
    * Appends or updates a transfer record in history.
+   * Batches rapid writes within a 100ms window to prevent saturating IndexedDB transactions.
    */
   public static async saveTransfer(transfer: Transfer): Promise<void> {
+    this.pendingSaves.set(transfer.id, transfer);
+
+    if (!this.flushTimeout) {
+      this.flushTimeout = setTimeout(() => {
+        this.flushTimeout = null;
+        this.flushPendingSaves().catch(() => {});
+      }, 100);
+    }
+  }
+
+  /**
+   * Forces an immediate commit of all pending transfer history updates.
+   */
+  public static async flushPendingSaves(): Promise<void> {
+    if (this.pendingSaves.size === 0) return;
+
+    const toFlush = Array.from(this.pendingSaves.values());
+    this.pendingSaves.clear();
+
     try {
-      const current = (await this.getHistory()) || [];
-      const index = current.findIndex((t) => t.id === transfer.id);
-      let updated: Transfer[];
-      if (index >= 0) {
-        current[index] = transfer;
-        updated = [...current];
-      } else {
-        updated = [transfer, ...current].slice(0, 100); // keep up to 100 recent
+      const current = (await get<Transfer[]>(HISTORY_KEY)) || [];
+      const map = new Map(current.map((t) => [t.id, t]));
+      for (const t of toFlush) {
+        map.set(t.id, t);
       }
+      const updated = Array.from(map.values())
+        .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+        .slice(0, MAX_RECENT_TRANSFERS);
+
       await set(HISTORY_KEY, updated);
     } catch (err) {
-      console.warn('Failed to save transfer to IndexedDB:', err);
+      console.warn('Failed to flush transfers to IndexedDB:', err);
     }
   }
 
@@ -41,6 +71,11 @@ export class StorageService {
    * Clears transfer history.
    */
   public static async clearHistory(): Promise<void> {
+    this.pendingSaves.clear();
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
     await del(HISTORY_KEY);
   }
 

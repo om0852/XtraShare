@@ -8,14 +8,34 @@ export class PeerConnectionManager {
   private makingOffer = new Map<string, boolean>();
   private messageListeners = new Set<(peerId: string, data: string | ArrayBuffer) => void>();
   private stateListeners = new Set<(peerId: string, state: RTCPeerConnectionState) => void>();
-
   private iceCandidateQueues = new Map<string, RTCIceCandidateInit[]>();
+  private unsubs: (() => void)[] = [];
 
   constructor() {
-    socketService.onSignal((packet) => this.handleSignal(packet));
-    socketService.onPeerLeave((deviceId) => {
-      this.closeConnection(deviceId);
-    });
+    this.unsubs.push(socketService.onSignal((packet) => this.handleSignal(packet)));
+    this.unsubs.push(
+      socketService.onPeerLeave((deviceId) => {
+        this.closeConnection(deviceId);
+      })
+    );
+  }
+
+  public destroy(): void {
+    for (const unsub of this.unsubs) {
+      try {
+        unsub();
+      } catch {}
+    }
+    this.unsubs = [];
+    for (const pc of this.connections.values()) {
+      try {
+        pc.close();
+      } catch {}
+    }
+    this.connections.clear();
+    this.dataChannels.clear();
+    this.messageListeners.clear();
+    this.stateListeners.clear();
   }
 
   /**
@@ -54,9 +74,42 @@ export class PeerConnectionManager {
     return pc;
   }
 
+  private getIceServers(): RTCIceServer[] {
+    // STUN-only ICE discovers *existence* of a NAT mapping but cannot relay
+    // media when both peers sit behind symmetric/restrictive NATs (the
+    // common case once you leave a LAN and deploy on the public internet).
+    // Without a TURN server, that negotiation simply fails and the app
+    // silently falls back to streaming file bytes through the signaling
+    // server's WebSocket relay — which is why a cloud deployment looks like
+    // it "goes through the internet/server" and is slow, even though on a
+    // local network the exact same code gets fast host-candidate P2P.
+    // Configure VITE_TURN_URL (+ optional VITE_TURN_USERNAME/VITE_TURN_CREDENTIAL)
+    // at build time to enable real P2P (or TURN-relayed P2P) across the internet.
+    const servers: RTCIceServer[] = [...DEFAULT_ICE_SERVERS];
+
+    const turnUrl = (import.meta as any).env?.VITE_TURN_URL;
+    if (turnUrl) {
+      const username = (import.meta as any).env?.VITE_TURN_USERNAME;
+      const credential = (import.meta as any).env?.VITE_TURN_CREDENTIAL;
+      servers.push({
+        urls: turnUrl.split(',').map((u: string) => u.trim()),
+        username,
+        credential
+      });
+    } else if (typeof window !== 'undefined' && !/localhost|127\.0\.0\.1|^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(window.location.hostname)) {
+      console.warn(
+        '[XtraShare] No TURN server configured (VITE_TURN_URL). On a public/cloud deployment, ' +
+        'P2P will frequently fail across NATs and transfers will silently fall back to the slow ' +
+        'server-relayed WebSocket path. See docs/deployment.md for TURN setup.'
+      );
+    }
+
+    return servers;
+  }
+
   private createPeerConnection(peerId: string): RTCPeerConnection {
     const pc = new RTCPeerConnection({
-      iceServers: DEFAULT_ICE_SERVERS
+      iceServers: this.getIceServers()
     });
 
     // Determine polite role: peer with lexicographically smaller ID is polite
@@ -111,6 +164,29 @@ export class PeerConnectionManager {
       }
     };
 
+    // Surface ICE negotiation failures explicitly instead of only finding
+    // out indirectly 10s later via "DataChannel not ready, falling back to
+    // relay". This is the actual answer to "why did it use relay" — it's
+    // always attempted per-peer regardless of how many devices are in the
+    // room; relay only kicks in when THIS specific negotiation didn't
+    // produce a usable candidate pair in time (commonly: no TURN server and
+    // a restrictive/symmetric NAT on at least one side — see getIceServers).
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE connection state with ${peerId}: ${pc.iceConnectionState} (gathering: ${pc.iceGatheringState})`);
+      if (pc.iceConnectionState === 'failed') {
+        console.warn(
+          `[WebRTC] ICE negotiation FAILED with ${peerId} — no usable candidate pair was found. ` +
+          `This is almost always a missing TURN server when peers aren't on the same LAN/NAT. ` +
+          `Attempting an ICE restart before falling back to the WebSocket relay...`
+        );
+        try {
+          pc.restartIce();
+        } catch (e) {
+          console.warn('[WebRTC] restartIce() failed:', e);
+        }
+      }
+    };
+
     return pc;
   }
 
@@ -132,8 +208,19 @@ export class PeerConnectionManager {
     };
 
     channel.onmessage = (event) => {
+      const data = event.data;
+      if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        data.arrayBuffer().then((buf) => {
+          for (const listener of this.messageListeners) {
+            listener(peerId, buf);
+          }
+        }).catch((err) => {
+          console.warn('Failed to read DataChannel Blob as ArrayBuffer:', err);
+        });
+        return;
+      }
       for (const listener of this.messageListeners) {
-        listener(peerId, event.data);
+        listener(peerId, data);
       }
     };
 
@@ -188,8 +275,21 @@ export class PeerConnectionManager {
           payload: pc.localDescription
         });
       } else if (packet.type === 'answer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(packet.payload));
-        await this.drainIceCandidates(peerId, pc);
+        if (pc.signalingState === 'have-local-offer') {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(packet.payload));
+            await this.drainIceCandidates(peerId, pc);
+          } catch (err) {
+            // Guard against concurrent answers or state change during await
+            if ((pc.signalingState as string) === 'stable') {
+              console.debug(`[WebRTC] Answer already applied for ${peerId}`);
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          console.debug(`[WebRTC] Skipping redundant answer for ${peerId} (signalingState is ${pc.signalingState})`);
+        }
       } else if (packet.type === 'ice-candidate') {
         if (packet.payload) {
           if (!pc.remoteDescription || !pc.remoteDescription.type) {
@@ -279,3 +379,10 @@ export class PeerConnectionManager {
 }
 
 export const peerConnectionManager = new PeerConnectionManager();
+
+if (typeof window !== 'undefined') {
+  if ((window as any).__xtrashare_pcm) {
+    (window as any).__xtrashare_pcm.destroy();
+  }
+  (window as any).__xtrashare_pcm = peerConnectionManager;
+}
